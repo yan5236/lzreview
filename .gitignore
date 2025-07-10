@@ -1,0 +1,21 @@
+node_modules/
+.wrangler/
+.env
+.env.local
+.env.production
+.env.development
+*.log
+.DS_Store
+Thumbs.db
+
+# Cloudflare Workers 特定文件
+wrangler.toml.local
+worker-configuration.d.ts
+
+# 开发工具
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.temp

@@ -1,0 +1,17 @@
+{
+  "name": "lzreview",
+  "version": "1.0.0",
+  "description": "一个基于Cloudflare Workers和D1数据库的静态网站评论系统",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute lzreview-db --file=src/database/schema.sql"
+  },
+  "keywords": ["comments", "cloudflare", "workers", "d1", "static-site"],
+  "author": "slcatwujian",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
