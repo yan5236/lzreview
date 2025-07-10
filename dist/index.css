@@ -1,0 +1,321 @@
+/* src/web/embed.css */
+const embedCSS = ` .lzreview-container {
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  max-width: 100%;
+  margin: 0;
+  color: #333;
+  line-height: 1.6;
+  font-size: 14px;
+}
+.lzreview-form {
+  background: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 30px;
+  border: 1px solid #e1e5e9;
+}
+.lzreview-form h3 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #2c3e50;
+}
+.lzreview-form-row {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+.lzreview-form-group {
+  flex: 1;
+}
+.lzreview-label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 500;
+  color: #555;
+}
+.lzreview-input,
+.lzreview-textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+.lzreview-input:focus,
+.lzreview-textarea:focus {
+  outline: none;
+  border-color: #007cba;
+  box-shadow: 0 0 0 2px rgba(0, 124, 186, 0.1);
+}
+.lzreview-textarea {
+  min-height: 100px;
+  max-height: 200px;
+  height: 100px;
+  resize: none;
+  font-family: inherit;
+}
+.lzreview-button {
+  background: #007cba;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+.lzreview-button:hover {
+  background: #005a87;
+}
+.lzreview-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+.lzreview-comments-list {
+  margin-top: 30px;
+}
+.lzreview-comments-list h3 {
+  margin-bottom: 20px;
+  color: #2c3e50;
+}
+.lzreview-comment {
+  border-bottom: 1px solid #eee;
+  padding: 20px 0;
+}
+.lzreview-comment:last-child {
+  border-bottom: none;
+}
+.lzreview-comment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #666;
+}
+.lzreview-comment-author {
+  font-weight: 500;
+  color: #333;
+}
+.lzreview-comment-email {
+  font-weight: 400;
+  color: #666;
+  font-size: 12px;
+}
+.lzreview-avatar-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+}
+.lzreview-avatar-preview img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid #ddd;
+  object-fit: cover;
+}
+.lzreview-comment-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  object-fit: cover;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+.lzreview-comment-header-with-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #666;
+}
+.lzreview-comment-author-info {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+.lzreview-comment-actions {
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+.lzreview-reply-button {
+  background: transparent;
+  border: 1px solid #ddd;
+  color: #666;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+.lzreview-reply-button:hover {
+  background: #f5f5f5;
+  border-color: #007cba;
+  color: #007cba;
+}
+.lzreview-reply-form {
+  margin-top: 10px;
+  padding: 15px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  border: 1px solid #e1e5e9;
+}
+.lzreview-reply-form .lzreview-textarea {
+  height: 80px;
+  margin-bottom: 10px;
+}
+.lzreview-reply-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.lzreview-button-small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.lzreview-button-cancel {
+  background: #6c757d;
+  color: white;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.lzreview-button-cancel:hover {
+  background: #5a6268;
+}
+.lzreview-comment-time {
+  font-size: 12px;
+}
+.lzreview-comment-content {
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.6;
+}
+.lzreview-replies {
+  margin-left: 20px;
+  margin-top: 15px;
+  border-left: 3px solid #f0f0f0;
+  padding-left: 15px;
+}
+.lzreview-error {
+  background: #f8d7da;
+  color: #721c24;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #f5c6cb;
+}
+.lzreview-success {
+  background: #d4edda;
+  color: #155724;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #c3e6cb;
+}
+.lzreview-loading {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+}
+.lzreview-char-count {
+  text-align: right;
+  font-size: 12px;
+  color: #666;
+  margin-top: 5px;
+}
+.lzreview-char-count.warning {
+  color: #e74c3c;
+}
+@media (max-width: 768px) {
+  .lzreview-form {
+    padding: 15px;
+    margin-bottom: 20px;
+  }
+  .lzreview-form-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .lzreview-replies {
+    margin-left: 10px;
+    padding-left: 10px;
+  }
+  .lzreview-comment {
+    padding: 15px 0;
+  }
+  .lzreview-comment-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
+}
+@media (max-width: 480px) {
+  .lzreview-container {
+    font-size: 13px;
+  }
+  .lzreview-form {
+    padding: 10px;
+  }
+  .lzreview-input,
+  .lzreview-textarea {
+    padding: 8px;
+  }
+  .lzreview-button {
+    padding: 8px 16px;
+    width: 100%;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  .lzreview-container {
+    color: #e0e0e0;
+  }
+  .lzreview-form {
+    background: #2a2a2a;
+    border-color: #404040;
+  }
+  .lzreview-form h3,
+  .lzreview-comments-list h3 {
+    color: #f0f0f0;
+  }
+  .lzreview-label {
+    color: #d0d0d0;
+  }
+  .lzreview-input,
+  .lzreview-textarea {
+    background: #1a1a1a;
+    border-color: #404040;
+    color: #e0e0e0;
+  }
+  .lzreview-input:focus,
+  .lzreview-textarea:focus {
+    border-color: #4a9eff;
+    box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.1);
+  }
+  .lzreview-comment {
+    border-bottom-color: #404040;
+  }
+  .lzreview-comment-author {
+    color: #f0f0f0;
+  }
+  .lzreview-comment-header {
+    color: #b0b0b0;
+  }
+  .lzreview-replies {
+    border-left-color: #404040;
+  }
+}
+`; export default embedCSS; {
+}
+/*# sourceMappingURL=index.css.map */
