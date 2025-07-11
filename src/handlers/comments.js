@@ -1,6 +1,7 @@
 import { validateComment, sanitizeInput } from '../utils/validation.js';
 import { getClientIP, getUserAgent, rateLimitCheck, containsBadWords, generateCSRFToken, verifyCSRFToken, hashIP, sanitizeErrorMessage } from '../utils/security.js';
 import { jsonResponse, errorResponse, successResponse } from '../utils/response.js';
+import { triggerCommentNotification } from './notifications.js';
 
 const cache = new Map();
 const csrfTokens = new Map(); // 存储CSRF令牌
@@ -44,7 +45,7 @@ export async function handleComments(request, db, env) {
         }
         return await getComments(request, db);
       case 'POST':
-        return await createComment(request, db);
+        return await createComment(request, db, env);
       case 'DELETE':
         if (url.pathname === '/api/comments/batch') {
           return await batchDeleteComments(request, db);
@@ -112,7 +113,7 @@ async function getComments(request, db) {
   }
 }
 
-async function createComment(request, db) {
+async function createComment(request, db, env) {
   try {
     let data;
     try {
@@ -174,6 +175,22 @@ async function createComment(request, db) {
     // 插入评论
     try {
       const commentId = await db.addComment(sanitizedData);
+      
+      // 同步触发通知推送（确保执行上下文完整）
+      const commentDataForNotification = {
+        ...sanitizedData,
+        id: commentId,
+        createdAt: new Date().toISOString()
+      };
+      
+      // 等待通知发送完成，确保在主请求上下文中执行
+      try {
+        console.log('📬 开始同步发送评论通知...');
+        const notificationResult = await triggerCommentNotification(commentDataForNotification, db, env);
+        console.log('📬 评论通知发送结果:', notificationResult);
+      } catch (error) {
+        console.error('📬 通知发送失败，但不影响评论发布:', error);
+      }
       
       return successResponse(
         { 

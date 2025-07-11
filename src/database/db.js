@@ -384,4 +384,280 @@ export class DatabaseService {
     const stmt = this.db.prepare('DELETE FROM rate_limits WHERE window_start < ?');
     await stmt.bind(cutoff).run();
   }
+
+  // 通知配置相关方法
+  async getNotificationConfig() {
+    try {
+      const stmt = this.db.prepare('SELECT config_data FROM notification_config WHERE id = 1');
+      const result = await stmt.first();
+      
+      if (result?.config_data) {
+        return JSON.parse(result.config_data);
+      }
+      
+      // 返回默认配置
+      return {
+        email: {
+          enabled: false,
+          recipients: [],
+          subscribers: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: 'default'
+        },
+        telegram: {
+          enabled: false,
+          chatIds: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: 'default'
+        },
+        webhook: {
+          enabled: false,
+          url: '',
+          method: 'POST',
+          headers: {},
+          template: 'default'
+        }
+      };
+    } catch (error) {
+      console.error('Database getNotificationConfig error:', error);
+      // 返回默认配置
+      return {
+        email: {
+          enabled: false,
+          recipients: [],
+          subscribers: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: 'default'
+        },
+        telegram: {
+          enabled: false,
+          chatIds: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: 'default'
+        },
+        webhook: {
+          enabled: false,
+          url: '',
+          method: 'POST',
+          headers: {},
+          template: 'default'
+        }
+      };
+    }
+  }
+
+  async saveNotificationConfig(config) {
+    try {
+      const configData = JSON.stringify(config);
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO notification_config (id, config_data, updated_at) 
+        VALUES (1, ?, CURRENT_TIMESTAMP)
+      `);
+      await stmt.bind(configData).run();
+      console.log('通知配置保存成功');
+    } catch (error) {
+      console.error('Database saveNotificationConfig error:', error);
+      throw new Error(`保存通知配置失败：${error.message}`);
+    }
+  }
+
+  // 邮件订阅相关方法
+  async getEmailSubscribers() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT id, email, name, page_url, subscribed_at, is_active 
+        FROM email_subscribers 
+        WHERE is_active = 1 
+        ORDER BY subscribed_at DESC
+      `);
+      const result = await stmt.all();
+      return result.results || [];
+    } catch (error) {
+      console.error('Database getEmailSubscribers error:', error);
+      return [];
+    }
+  }
+
+  async getEmailSubscriber(email) {
+    try {
+      const stmt = this.db.prepare('SELECT * FROM email_subscribers WHERE email = ?');
+      const result = await stmt.bind(email).first();
+      return result;
+    } catch (error) {
+      console.error('Database getEmailSubscriber error:', error);
+      return null;
+    }
+  }
+
+  async addEmailSubscriber(subscriberData) {
+    try {
+      const { email, name, pageUrl, subscribedAt, isActive } = subscriberData;
+      
+      // 数据验证
+      if (!email || typeof email !== 'string') {
+        throw new Error('邮箱地址不能为空');
+      }
+      
+      // 邮箱格式验证
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        throw new Error('邮箱格式不正确');
+      }
+      
+      // 长度限制
+      if (email.length > 254) {
+        throw new Error('邮箱地址过长');
+      }
+      
+      if (name && name.length > 100) {
+        throw new Error('名称过长');
+      }
+      
+      const stmt = this.db.prepare(`
+        INSERT INTO email_subscribers (email, name, page_url, subscribed_at, is_active) 
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const result = await stmt.bind(
+        email.toLowerCase().trim(),
+        name || email.split('@')[0],
+        pageUrl || null,
+        subscribedAt || new Date().toISOString(),
+        isActive !== false ? 1 : 0
+      ).run();
+      
+      console.log(`邮件订阅添加成功: ${email}`);
+      return result.meta.last_row_id;
+    } catch (error) {
+      console.error('Database addEmailSubscriber error:', error);
+      throw new Error(`添加邮件订阅失败：${error.message}`);
+    }
+  }
+
+  async removeEmailSubscriberByEmail(email) {
+    try {
+      const stmt = this.db.prepare('DELETE FROM email_subscribers WHERE email = ?');
+      const result = await stmt.bind(email.toLowerCase().trim()).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error('Database removeEmailSubscriberByEmail error:', error);
+      return false;
+    }
+  }
+
+  async removeEmailSubscriberById(id) {
+    try {
+      const stmt = this.db.prepare('DELETE FROM email_subscribers WHERE id = ?');
+      const result = await stmt.bind(id).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error('Database removeEmailSubscriberById error:', error);
+      return false;
+    }
+  }
+
+  // 获取单个评论详情
+  async getCommentById(commentId) {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT 
+          id, page_url, author_name, author_email, author_qq, content, created_at, parent_id
+        FROM comments 
+        WHERE id = ?
+      `);
+      const result = await stmt.bind(commentId).first();
+      return result;
+    } catch (error) {
+      console.error('Database getCommentById error:', error);
+      return null;
+    }
+  }
+
+  // Telegram 订阅者相关方法
+  async getTelegramSubscribers() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT chat_id, name, chat_type, page_url, subscribed_at, is_active
+        FROM telegram_subscribers 
+        WHERE is_active = 1
+        ORDER BY subscribed_at DESC
+      `);
+      const result = await stmt.all();
+      return result.results || [];
+    } catch (error) {
+      console.error('Database getTelegramSubscribers error:', error);
+      return [];
+    }
+  }
+
+  async getTelegramSubscriber(chatId) {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT * FROM telegram_subscribers WHERE chat_id = ?
+      `);
+      const result = await stmt.bind(chatId.toString()).first();
+      return result;
+    } catch (error) {
+      console.error('Database getTelegramSubscriber error:', error);
+      return null;
+    }
+  }
+
+  async addTelegramSubscriber({ chatId, name, chatType, pageUrl, subscribedAt, isActive }) {
+    try {
+      // 数据验证
+      if (!chatId || typeof chatId !== 'string' && typeof chatId !== 'number') {
+        throw new Error('Chat ID 不能为空');
+      }
+      
+      // 长度限制
+      if (name && name.length > 100) {
+        throw new Error('名称过长');
+      }
+      
+      const stmt = this.db.prepare(`
+        INSERT INTO telegram_subscribers (chat_id, name, chat_type, page_url, subscribed_at, is_active) 
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const result = await stmt.bind(
+        chatId.toString(),
+        name || `Chat ${chatId}`,
+        chatType || 'private',
+        pageUrl || null,
+        subscribedAt || new Date().toISOString(),
+        isActive !== false ? 1 : 0
+      ).run();
+      
+      console.log(`Telegram 订阅添加成功: ${chatId}`);
+      return result.meta.last_row_id;
+    } catch (error) {
+      console.error('Database addTelegramSubscriber error:', error);
+      throw new Error(`添加 Telegram 订阅失败：${error.message}`);
+    }
+  }
+
+  async removeTelegramSubscriberByChatId(chatId) {
+    try {
+      const stmt = this.db.prepare('DELETE FROM telegram_subscribers WHERE chat_id = ?');
+      const result = await stmt.bind(chatId.toString()).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error('Database removeTelegramSubscriberByChatId error:', error);
+      return false;
+    }
+  }
+
+  async removeTelegramSubscriberById(id) {
+    try {
+      const stmt = this.db.prepare('DELETE FROM telegram_subscribers WHERE id = ?');
+      const result = await stmt.bind(id).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error('Database removeTelegramSubscriberById error:', error);
+      return false;
+    }
+  }
 }

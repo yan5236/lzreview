@@ -56,3 +56,56 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 -- 创建速率限制索引
 CREATE INDEX IF NOT EXISTS idx_rate_limits_ip ON rate_limits(ip_hash);
 CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_start);
+
+-- 通知配置表
+CREATE TABLE IF NOT EXISTS notification_config (
+  id INTEGER PRIMARY KEY,
+  config_data TEXT NOT NULL,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 邮件订阅表
+CREATE TABLE IF NOT EXISTS email_subscribers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT,
+  page_url TEXT,
+  subscribed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  is_active INTEGER DEFAULT 1
+);
+
+-- 创建邮件订阅索引
+CREATE INDEX IF NOT EXISTS idx_email_subscribers_email ON email_subscribers(email);
+CREATE INDEX IF NOT EXISTS idx_email_subscribers_active ON email_subscribers(is_active);
+
+-- Telegram 订阅表
+CREATE TABLE IF NOT EXISTS telegram_subscribers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT UNIQUE NOT NULL,
+  name TEXT,
+  chat_type TEXT DEFAULT 'private',
+  page_url TEXT,
+  subscribed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  is_active INTEGER DEFAULT 1
+);
+
+-- 创建 Telegram 订阅索引
+CREATE INDEX IF NOT EXISTS idx_telegram_subscribers_chat_id ON telegram_subscribers(chat_id);
+CREATE INDEX IF NOT EXISTS idx_telegram_subscribers_active ON telegram_subscribers(is_active);
+
+-- 通知发送日志表（可选，用于记录发送历史）
+CREATE TABLE IF NOT EXISTS notification_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  comment_id INTEGER,
+  notification_type TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  status TEXT NOT NULL,
+  message TEXT,
+  sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (comment_id) REFERENCES comments(id)
+);
+
+-- 创建通知日志索引
+CREATE INDEX IF NOT EXISTS idx_notification_logs_comment ON notification_logs(comment_id);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_type ON notification_logs(notification_type);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_sent_at ON notification_logs(sent_at);

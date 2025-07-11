@@ -1,6 +1,7 @@
 import { DatabaseService } from './database/db.js';
 import { handleComments } from './handlers/comments.js';
 import { handleWhitelist } from './handlers/whitelist.js';
+import { handleNotifications } from './handlers/notifications.js';
 import { corsResponse, htmlResponse, jsonResponse } from './utils/response.js';
 
 export default {
@@ -22,6 +23,11 @@ export default {
     // 白名单管理
     if (url.pathname.startsWith('/api/whitelist')) {
       return handleWhitelist(request, db, env);
+    }
+
+    // 通知推送管理
+    if (url.pathname.startsWith('/api/notifications')) {
+      return handleNotifications(request, db, env);
     }
 
     // 管理面板
@@ -608,6 +614,7 @@ async function serveAdminPanel(env) {
                 <button class="tab active" onclick="showTab('pages')">页面管理</button>
                 <button class="tab" onclick="showTab('comments')">评论管理</button>
                 <button class="tab" onclick="showTab('whitelist')">白名单管理</button>
+                <button class="tab" onclick="showTab('notifications')">通知推送</button>
             </div>
 
             <div id="pages-content" class="tab-content active">
@@ -657,6 +664,146 @@ async function serveAdminPanel(env) {
                     </div>
                     <div id="whitelist-loading" class="loading">正在加载白名单...</div>
                     <div id="whitelist-list"></div>
+                </div>
+            </div>
+
+            <div id="notifications-content" class="tab-content">
+                <div class="card">
+                    <h3>通知推送配置</h3>
+                    <div id="notification-status" class="alert" style="display: none;"></div>
+                    
+                    <!-- 推送器状态 -->
+                    <div class="card" style="margin-bottom: 20px;">
+                        <h4>推送器状态</h4>
+                        <div id="notifiers-status">
+                            <div class="loading">正在检查推送器状态...</div>
+                        </div>
+                    </div>
+
+                    <!-- 邮箱推送配置 -->
+                    <div class="card">
+                        <h4>邮箱推送配置</h4>
+                        <div style="background: #e7f3ff; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #007cba;">
+                            <h5 style="margin: 0 0 10px 0; color: #007cba;">📧 邮箱推送功能说明</h5>
+                            <p style="margin: 0; color: #333; line-height: 1.5;">
+                                <strong>管理员邮箱</strong>：当网站有新评论时，系统会自动发送邮件通知到这些邮箱，让你及时了解评论动态。<br>
+                                <strong>用途</strong>：适合网站管理员、博主等需要及时响应评论的人员。<br>
+                                <strong>格式</strong>：支持多个邮箱，用逗号分隔，如：admin@example.com, blogger@example.com
+                            </p>
+                        </div>
+                        
+                        <form id="email-notification-form">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="email-enabled"> 启用邮箱推送
+                                </label>
+                                <small style="color: #666; display: block; margin-top: 5px;">
+                                    勾选后，每当有新评论发布时，系统会自动发送邮件通知
+                                </small>
+                            </div>
+                            
+                            <div id="email-config" style="display: none;">
+                                <div class="form-group">
+                                    <label class="form-label" for="admin-emails">
+                                        📮 管理员邮箱地址 
+                                        <span style="color: #dc3545;">*</span>
+                                    </label>
+                                    <input type="text" id="admin-emails" class="form-input" 
+                                           placeholder="your-email@qq.com, admin@gmail.com" 
+                                           style="margin-bottom: 5px;">
+                                    <small style="color: #666; line-height: 1.4;">
+                                        💡 <strong>作用</strong>：当有新评论时，这些邮箱会收到通知邮件<br>
+                                        💡 <strong>格式</strong>：多个邮箱用逗号分隔<br>
+                                        💡 <strong>建议</strong>：填写你经常查看的邮箱，如QQ邮箱、Gmail等
+                                    </small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="include-page-info" checked> 在邮件中包含页面信息
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="include-comment-content" checked> 在邮件中包含评论内容
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <button type="submit" class="btn">保存配置</button>
+                                <button type="button" class="btn btn-secondary" onclick="testEmailNotification()">测试邮件发送</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Telegram推送配置 -->
+                    <div class="card">
+                        <h4>Telegram推送配置</h4>
+                        <div style="background: #e8f5e8; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #28a745;">
+                            <h5 style="margin: 0 0 10px 0; color: #28a745;">📱 Telegram推送功能说明</h5>
+                            <p style="margin: 0; color: #333; line-height: 1.5;">
+                                <strong>Chat ID</strong>：当网站有新评论时，系统会自动发送消息到指定的Telegram聊天，让你及时了解评论动态。<br>
+                                <strong>用途</strong>：适合希望通过Telegram即时接收通知的用户，支持个人、群组和频道。<br>
+                                <strong>配置</strong>：需要先创建Telegram机器人并获取Chat ID，详见 <a href="/TELEGRAM_SETUP.md" target="_blank">配置指南</a>
+                            </p>
+                        </div>
+                        
+                        <form id="telegram-notification-form">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="telegram-enabled"> 启用Telegram推送
+                                </label>
+                                <small style="color: #666; display: block; margin-top: 5px;">
+                                    勾选后，每当有新评论发布时，系统会自动发送Telegram消息通知
+                                </small>
+                            </div>
+                            
+                            <div id="telegram-config" style="display: none;">
+                                <div class="form-group">
+                                    <label class="form-label" for="telegram-chat-ids">
+                                        💬 接收通知的Chat ID 
+                                        <span style="color: #dc3545;">*</span>
+                                    </label>
+                                    <input type="text" id="telegram-chat-ids" class="form-input" 
+                                           placeholder="123456789, -987654321, @your_channel" 
+                                           style="margin-bottom: 5px;">
+                                    <small style="color: #666; line-height: 1.4;">
+                                        💡 <strong>格式</strong>：多个Chat ID用逗号分隔<br>
+                                        💡 <strong>个人聊天</strong>：正数，如 123456789<br>
+                                        💡 <strong>群组聊天</strong>：负数，如 -987654321<br>
+                                        💡 <strong>公开频道</strong>：@用户名，如 @your_channel<br>
+                                        💡 <strong>获取方法</strong>：查看 <a href="/TELEGRAM_SETUP.md" target="_blank">配置指南</a>
+                                    </small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="telegram-include-page-info" checked> 在消息中包含页面信息
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="telegram-include-comment-content" checked> 在消息中包含评论内容
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <button type="submit" class="btn">保存配置</button>
+                                <button type="button" class="btn btn-secondary" onclick="testTelegramNotification()">测试Telegram推送</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- 订阅者管理 -->
+                    <div class="card">
+                        <h4>邮件订阅者管理</h4>
+                        <div id="subscribers-loading" class="loading" style="display: none;">正在加载订阅者...</div>
+                        <div id="subscribers-list"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -731,6 +878,8 @@ async function serveAdminPanel(env) {
                 loadComments();
             } else if (tabName === 'whitelist') {
                 loadWhitelist();
+            } else if (tabName === 'notifications') {
+                loadNotificationSettings();
             }
         }
 
@@ -1054,6 +1203,286 @@ async function serveAdminPanel(env) {
             if (!dateString) return '-';
             const date = new Date(dateString.replace(' ', 'T'));
             return date.toLocaleString('zh-CN');
+        }
+
+        // 通知设置相关函数
+        async function loadNotificationSettings() {
+            await loadNotifiersStatus();
+            await loadNotificationConfig();
+            await loadEmailSubscribers();
+        }
+
+        async function loadNotifiersStatus() {
+            const statusEl = document.getElementById('notifiers-status');
+            
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/notifiers\`, {
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                if (!response.ok) throw new Error('Failed to load notifiers');
+
+                const data = await response.json();
+                const notifiers = data.data.notifiers;
+                
+                statusEl.innerHTML = Object.entries(notifiers).map(([type, info]) => \`
+                    <div class="notifier-status" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; margin-bottom: 10px; background: \${info.configured ? '#d4edda' : '#f8d7da'}; border-radius: 4px;">
+                        <div>
+                            <strong>\${info.name}</strong>
+                            <br><small>\${info.description}</small>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; background: \${info.configured ? '#28a745' : '#dc3545'};">
+                                \${info.configured ? '✅ 已配置' : '❌ 未配置'}
+                            </span>
+                            \${!info.configured ? \`<br><small style="color: #666;">需要: \${info.requiredEnvVars.join(', ')}</small>\` : ''}
+                        </div>
+                    </div>
+                \`).join('');
+            } catch (error) {
+                statusEl.innerHTML = '<p style="color: #dc3545;">加载推送器状态失败</p>';
+            }
+        }
+
+        async function loadNotificationConfig() {
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/config\`, {
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                if (!response.ok) throw new Error('Failed to load config');
+
+                const data = await response.json();
+                const config = data.data || {};
+                
+                // 填充邮箱配置
+                const emailConfig = config.email || {};
+                document.getElementById('email-enabled').checked = emailConfig.enabled || false;
+                document.getElementById('admin-emails').value = (emailConfig.recipients || []).join(', ');
+                document.getElementById('include-page-info').checked = emailConfig.includePageInfo !== false;
+                document.getElementById('include-comment-content').checked = emailConfig.includeCommentContent !== false;
+                
+                toggleEmailConfig();
+
+                // 加载Telegram配置
+                const telegramConfig = config.telegram || {};
+                document.getElementById('telegram-enabled').checked = telegramConfig.enabled || false;
+                document.getElementById('telegram-chat-ids').value = (telegramConfig.chatIds || []).join(', ');
+                document.getElementById('telegram-include-page-info').checked = telegramConfig.includePageInfo !== false;
+                document.getElementById('telegram-include-comment-content').checked = telegramConfig.includeCommentContent !== false;
+                
+                toggleTelegramConfig();
+            } catch (error) {
+                console.error('加载通知配置失败:', error);
+            }
+        }
+
+        function toggleEmailConfig() {
+            const enabled = document.getElementById('email-enabled').checked;
+            document.getElementById('email-config').style.display = enabled ? 'block' : 'none';
+        }
+
+        function toggleTelegramConfig() {
+            const enabled = document.getElementById('telegram-enabled').checked;
+            document.getElementById('telegram-config').style.display = enabled ? 'block' : 'none';
+        }
+
+        // 绑定邮箱启用复选框事件
+        document.getElementById('email-enabled').addEventListener('change', toggleEmailConfig);
+
+        // 绑定Telegram启用复选框事件
+        document.getElementById('telegram-enabled').addEventListener('change', toggleTelegramConfig);
+
+        // 绑定邮箱配置表单提交事件
+        document.getElementById('email-notification-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveNotificationConfig();
+        });
+
+        // 绑定Telegram配置表单提交事件
+        document.getElementById('telegram-notification-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveNotificationConfig();
+        });
+
+        async function saveNotificationConfig() {
+            try {
+                const emailEnabled = document.getElementById('email-enabled').checked;
+                const adminEmails = document.getElementById('admin-emails').value
+                    .split(',')
+                    .map(email => email.trim())
+                    .filter(email => email);
+
+                const telegramEnabled = document.getElementById('telegram-enabled').checked;
+                const telegramChatIds = document.getElementById('telegram-chat-ids').value
+                    .split(',')
+                    .map(chatId => chatId.trim())
+                    .filter(chatId => chatId);
+                    
+                const config = {
+                    email: {
+                        enabled: emailEnabled,
+                        recipients: adminEmails,
+                        subscribers: [], // 保持现有订阅者
+                        includePageInfo: document.getElementById('include-page-info').checked,
+                        includeCommentContent: document.getElementById('include-comment-content').checked,
+                        template: 'default'
+                    },
+                    telegram: {
+                        enabled: telegramEnabled,
+                        chatIds: telegramChatIds,
+                        includePageInfo: document.getElementById('telegram-include-page-info').checked,
+                        includeCommentContent: document.getElementById('telegram-include-comment-content').checked,
+                        template: 'default'
+                    }
+                };
+
+                const response = await fetch(\`\${apiUrl}/api/notifications/config\`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': \`Bearer \${adminToken}\`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage('通知配置保存成功', 'success');
+                } else {
+                    showNotificationMessage(data.message || '保存失败', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('保存配置失败', 'error');
+            }
+        }
+
+        async function testEmailNotification() {
+            const testEmail = prompt('请输入测试邮箱地址:');
+            if (!testEmail) return;
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/test\`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': \`Bearer \${adminToken}\`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'email',
+                        config: { testEmail }
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage(\`测试邮件已发送到 \${testEmail}\`, 'success');
+                } else {
+                    showNotificationMessage(data.message || '测试失败', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('测试邮件发送失败', 'error');
+            }
+        }
+
+        async function testTelegramNotification() {
+            const testChatId = prompt('请输入测试Chat ID:');
+            if (!testChatId) return;
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/test\`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': \`Bearer \${adminToken}\`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'telegram',
+                        config: { testChatId }
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage(\`测试消息已发送到 Chat ID: \${testChatId}\`, 'success');
+                } else {
+                    showNotificationMessage(data.message || '测试失败', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('测试Telegram推送失败', 'error');
+            }
+        }
+
+        async function loadEmailSubscribers() {
+            const loadingEl = document.getElementById('subscribers-loading');
+            const listEl = document.getElementById('subscribers-list');
+            
+            loadingEl.style.display = 'block';
+            listEl.innerHTML = '';
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/subscribers\`, {
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                if (!response.ok) throw new Error('Failed to load subscribers');
+
+                const data = await response.json();
+                const subscribers = data.data.subscribers || [];
+                
+                if (subscribers.length === 0) {
+                    listEl.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">暂无邮件订阅者</p>';
+                } else {
+                    listEl.innerHTML = subscribers.map(subscriber => \`
+                        <div class="whitelist-item">
+                            <div>
+                                <strong>\${subscriber.email}</strong>
+                                \${subscriber.name && subscriber.name !== subscriber.email.split('@')[0] ? \`<br><small>\${subscriber.name}</small>\` : ''}
+                                \${subscriber.page_url ? \`<br><small>页面: \${subscriber.page_url}</small>\` : ''}
+                                <br><small>订阅时间: \${formatDate(subscriber.subscribed_at)}</small>
+                            </div>
+                            <button class="btn btn-danger" onclick="removeEmailSubscriber('\${subscriber.email}')">删除</button>
+                        </div>
+                    \`).join('');
+                }
+
+                loadingEl.style.display = 'none';
+            } catch (error) {
+                loadingEl.style.display = 'none';
+                listEl.innerHTML = '<p style="color: #dc3545;">加载订阅者失败</p>';
+            }
+        }
+
+        async function removeEmailSubscriber(email) {
+            if (!confirm(\`确定要删除订阅者 \${email} 吗？\`)) return;
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/subscribe/\${encodeURIComponent(email)}\`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage('订阅者删除成功', 'success');
+                    await loadEmailSubscribers();
+                } else {
+                    showNotificationMessage(data.message || '删除失败', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('删除订阅者失败', 'error');
+            }
+        }
+
+        function showNotificationMessage(message, type) {
+            const messageEl = document.getElementById('notification-status');
+            messageEl.className = \`alert alert-\${type}\`;
+            messageEl.textContent = message;
+            messageEl.style.display = 'block';
+            
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 3000);
         }
     </script>
 </body>

@@ -7,6 +7,7 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+wrangler.toml
 
 # Cloudflare Workers 特定文件
 wrangler.toml.local
@@ -19,3 +20,4 @@ worker-configuration.d.ts
 # 临时文件
 *.tmp
 *.temp
+

@@ -8,7 +8,5 @@ database_name = "lzreview-db"
 database_id = "your-database-id-here"
 
 [vars]
-# 请生成一个强随机令牌替换此值
 ADMIN_TOKEN = "your-admin-token-here"
-# 您的网站URL（可选）
 SITE_URL = "your-site-url.com"
