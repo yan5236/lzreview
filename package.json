@@ -8,10 +8,16 @@
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 execute lzreview-db --file=src/database/schema.sql"
   },
-  "keywords": ["comments", "cloudflare", "workers", "d1", "static-site"],
+  "keywords": [
+    "comments",
+    "cloudflare",
+    "workers",
+    "d1",
+    "static-site"
+  ],
   "author": "slcatwujian",
   "license": "MIT",
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "^4.24.3"
   }
 }

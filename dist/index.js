@@ -782,7 +782,7 @@ var init_embed = __esm({
 });
 
 // src/web/embed.css
-var require_ = __commonJS({
+var require_embed = __commonJS({
   "src/web/embed.css"(exports, module) {
     module.exports = {};
   }
@@ -790,6 +790,9 @@ var require_ = __commonJS({
 
 // src/database/db.js
 var DatabaseService = class {
+  static {
+    __name(this, "DatabaseService");
+  }
   constructor(db) {
     this.db = db;
   }
@@ -1102,8 +1105,252 @@ var DatabaseService = class {
     const stmt = this.db.prepare("DELETE FROM rate_limits WHERE window_start < ?");
     await stmt.bind(cutoff).run();
   }
+  // 通知配置相关方法
+  async getNotificationConfig() {
+    try {
+      const stmt = this.db.prepare("SELECT config_data FROM notification_config WHERE id = 1");
+      const result = await stmt.first();
+      if (result?.config_data) {
+        return JSON.parse(result.config_data);
+      }
+      return {
+        email: {
+          enabled: false,
+          recipients: [],
+          subscribers: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: "default"
+        },
+        telegram: {
+          enabled: false,
+          chatIds: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: "default"
+        },
+        webhook: {
+          enabled: false,
+          url: "",
+          method: "POST",
+          headers: {},
+          template: "default"
+        }
+      };
+    } catch (error) {
+      console.error("Database getNotificationConfig error:", error);
+      return {
+        email: {
+          enabled: false,
+          recipients: [],
+          subscribers: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: "default"
+        },
+        telegram: {
+          enabled: false,
+          chatIds: [],
+          includePageInfo: true,
+          includeCommentContent: true,
+          template: "default"
+        },
+        webhook: {
+          enabled: false,
+          url: "",
+          method: "POST",
+          headers: {},
+          template: "default"
+        }
+      };
+    }
+  }
+  async saveNotificationConfig(config) {
+    try {
+      const configData = JSON.stringify(config);
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO notification_config (id, config_data, updated_at) 
+        VALUES (1, ?, CURRENT_TIMESTAMP)
+      `);
+      await stmt.bind(configData).run();
+      console.log("\u901A\u77E5\u914D\u7F6E\u4FDD\u5B58\u6210\u529F");
+    } catch (error) {
+      console.error("Database saveNotificationConfig error:", error);
+      throw new Error(`\u4FDD\u5B58\u901A\u77E5\u914D\u7F6E\u5931\u8D25\uFF1A${error.message}`);
+    }
+  }
+  // 邮件订阅相关方法
+  async getEmailSubscribers() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT id, email, name, page_url, subscribed_at, is_active 
+        FROM email_subscribers 
+        WHERE is_active = 1 
+        ORDER BY subscribed_at DESC
+      `);
+      const result = await stmt.all();
+      return result.results || [];
+    } catch (error) {
+      console.error("Database getEmailSubscribers error:", error);
+      return [];
+    }
+  }
+  async getEmailSubscriber(email) {
+    try {
+      const stmt = this.db.prepare("SELECT * FROM email_subscribers WHERE email = ?");
+      const result = await stmt.bind(email).first();
+      return result;
+    } catch (error) {
+      console.error("Database getEmailSubscriber error:", error);
+      return null;
+    }
+  }
+  async addEmailSubscriber(subscriberData) {
+    try {
+      const { email, name, pageUrl, subscribedAt, isActive } = subscriberData;
+      if (!email || typeof email !== "string") {
+        throw new Error("\u90AE\u7BB1\u5730\u5740\u4E0D\u80FD\u4E3A\u7A7A");
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        throw new Error("\u90AE\u7BB1\u683C\u5F0F\u4E0D\u6B63\u786E");
+      }
+      if (email.length > 254) {
+        throw new Error("\u90AE\u7BB1\u5730\u5740\u8FC7\u957F");
+      }
+      if (name && name.length > 100) {
+        throw new Error("\u540D\u79F0\u8FC7\u957F");
+      }
+      const stmt = this.db.prepare(`
+        INSERT INTO email_subscribers (email, name, page_url, subscribed_at, is_active) 
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const result = await stmt.bind(
+        email.toLowerCase().trim(),
+        name || email.split("@")[0],
+        pageUrl || null,
+        subscribedAt || (/* @__PURE__ */ new Date()).toISOString(),
+        isActive !== false ? 1 : 0
+      ).run();
+      console.log(`\u90AE\u4EF6\u8BA2\u9605\u6DFB\u52A0\u6210\u529F: ${email}`);
+      return result.meta.last_row_id;
+    } catch (error) {
+      console.error("Database addEmailSubscriber error:", error);
+      throw new Error(`\u6DFB\u52A0\u90AE\u4EF6\u8BA2\u9605\u5931\u8D25\uFF1A${error.message}`);
+    }
+  }
+  async removeEmailSubscriberByEmail(email) {
+    try {
+      const stmt = this.db.prepare("DELETE FROM email_subscribers WHERE email = ?");
+      const result = await stmt.bind(email.toLowerCase().trim()).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error("Database removeEmailSubscriberByEmail error:", error);
+      return false;
+    }
+  }
+  async removeEmailSubscriberById(id) {
+    try {
+      const stmt = this.db.prepare("DELETE FROM email_subscribers WHERE id = ?");
+      const result = await stmt.bind(id).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error("Database removeEmailSubscriberById error:", error);
+      return false;
+    }
+  }
+  // 获取单个评论详情
+  async getCommentById(commentId) {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT 
+          id, page_url, author_name, author_email, author_qq, content, created_at, parent_id
+        FROM comments 
+        WHERE id = ?
+      `);
+      const result = await stmt.bind(commentId).first();
+      return result;
+    } catch (error) {
+      console.error("Database getCommentById error:", error);
+      return null;
+    }
+  }
+  // Telegram 订阅者相关方法
+  async getTelegramSubscribers() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT chat_id, name, chat_type, page_url, subscribed_at, is_active
+        FROM telegram_subscribers 
+        WHERE is_active = 1
+        ORDER BY subscribed_at DESC
+      `);
+      const result = await stmt.all();
+      return result.results || [];
+    } catch (error) {
+      console.error("Database getTelegramSubscribers error:", error);
+      return [];
+    }
+  }
+  async getTelegramSubscriber(chatId) {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT * FROM telegram_subscribers WHERE chat_id = ?
+      `);
+      const result = await stmt.bind(chatId.toString()).first();
+      return result;
+    } catch (error) {
+      console.error("Database getTelegramSubscriber error:", error);
+      return null;
+    }
+  }
+  async addTelegramSubscriber({ chatId, name, chatType, pageUrl, subscribedAt, isActive }) {
+    try {
+      if (!chatId || typeof chatId !== "string" && typeof chatId !== "number") {
+        throw new Error("Chat ID \u4E0D\u80FD\u4E3A\u7A7A");
+      }
+      if (name && name.length > 100) {
+        throw new Error("\u540D\u79F0\u8FC7\u957F");
+      }
+      const stmt = this.db.prepare(`
+        INSERT INTO telegram_subscribers (chat_id, name, chat_type, page_url, subscribed_at, is_active) 
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const result = await stmt.bind(
+        chatId.toString(),
+        name || `Chat ${chatId}`,
+        chatType || "private",
+        pageUrl || null,
+        subscribedAt || (/* @__PURE__ */ new Date()).toISOString(),
+        isActive !== false ? 1 : 0
+      ).run();
+      console.log(`Telegram \u8BA2\u9605\u6DFB\u52A0\u6210\u529F: ${chatId}`);
+      return result.meta.last_row_id;
+    } catch (error) {
+      console.error("Database addTelegramSubscriber error:", error);
+      throw new Error(`\u6DFB\u52A0 Telegram \u8BA2\u9605\u5931\u8D25\uFF1A${error.message}`);
+    }
+  }
+  async removeTelegramSubscriberByChatId(chatId) {
+    try {
+      const stmt = this.db.prepare("DELETE FROM telegram_subscribers WHERE chat_id = ?");
+      const result = await stmt.bind(chatId.toString()).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error("Database removeTelegramSubscriberByChatId error:", error);
+      return false;
+    }
+  }
+  async removeTelegramSubscriberById(id) {
+    try {
+      const stmt = this.db.prepare("DELETE FROM telegram_subscribers WHERE id = ?");
+      const result = await stmt.bind(id).run();
+      return result.meta.changes > 0;
+    } catch (error) {
+      console.error("Database removeTelegramSubscriberById error:", error);
+      return false;
+    }
+  }
 };
-__name(DatabaseService, "DatabaseService");
 
 // src/utils/validation.js
 function validateComment(data) {
@@ -1160,15 +1407,13 @@ function isValidQQ(qq) {
 }
 __name(isValidQQ, "isValidQQ");
 function containsControlCharacters(str) {
-  if (typeof str !== "string")
-    return false;
+  if (typeof str !== "string") return false;
   const dangerousChars = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFEFF]/;
   return dangerousChars.test(str);
 }
 __name(containsControlCharacters, "containsControlCharacters");
 function sanitizeInput(input) {
-  if (typeof input !== "string")
-    return input;
+  if (typeof input !== "string") return input;
   return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;").replace(/\//g, "&#x2F;").replace(/\n/g, "&#x0A;").replace(/\r/g, "&#x0D;").replace(/\t/g, "&#x09;");
 }
 __name(sanitizeInput, "sanitizeInput");
@@ -1229,8 +1474,7 @@ function rateLimitCheck(ip, cache2) {
 }
 __name(rateLimitCheck, "rateLimitCheck");
 function containsBadWords(text) {
-  if (typeof text !== "string")
-    return false;
+  if (typeof text !== "string") return false;
   const badWords = [
     "\u5783\u573E",
     "\u5E7F\u544A",
@@ -1252,8 +1496,7 @@ function containsBadWords(text) {
   ];
   const lowerText = text.toLowerCase();
   return badWords.some((word) => {
-    if (lowerText.includes(word))
-      return true;
+    if (lowerText.includes(word)) return true;
     const variations = generateWordVariations(word);
     return variations.some((variant) => lowerText.includes(variant));
   });
@@ -1303,8 +1546,7 @@ async function hashIP(ip) {
 }
 __name(hashIP, "hashIP");
 function sanitizeErrorMessage(error) {
-  if (!error)
-    return "\u672A\u77E5\u9519\u8BEF";
+  if (!error) return "\u672A\u77E5\u9519\u8BEF";
   const message = error.message || error.toString();
   const sensitivePatterns = [
     /table.*not found/i,
@@ -1378,6 +1620,1664 @@ function htmlResponse(html, status = 200) {
 }
 __name(htmlResponse, "htmlResponse");
 
+// src/notifiers/email.js
+var EmailNotifier = class {
+  static {
+    __name(this, "EmailNotifier");
+  }
+  constructor(config) {
+    this.config = {
+      apiKey: config.apiKey,
+      fromName: config.fromName || "lzreview\u8BC4\u8BBA\u7CFB\u7EDF",
+      fromEmail: config.fromEmail || "notifications@example.com",
+      apiUrl: "https://api.resend.com/emails"
+    };
+  }
+  /**
+   * 发送新评论通知邮件
+   */
+  async sendNewCommentNotification(commentData, emailConfig) {
+    console.log("\u{1F4EE} EmailNotifier: \u5F00\u59CB\u53D1\u9001\u65B0\u8BC4\u8BBA\u901A\u77E5\u90AE\u4EF6");
+    console.log("\u{1F4EE} \u90AE\u4EF6\u914D\u7F6E:", emailConfig);
+    console.log("\u{1F4EE} API Key \u914D\u7F6E:", this.config.apiKey ? "\u2705 \u5DF2\u914D\u7F6E" : "\u274C \u672A\u914D\u7F6E");
+    try {
+      const allRecipients = [
+        ...emailConfig.recipients || [],
+        ...emailConfig.subscribers || []
+      ];
+      console.log("\u{1F4EE} \u6536\u4EF6\u4EBA\u5217\u8868:", allRecipients);
+      if (allRecipients.length === 0) {
+        console.log("\u274C \u6CA1\u6709\u914D\u7F6E\u6536\u4EF6\u4EBA");
+        return {
+          success: false,
+          message: "\u6CA1\u6709\u914D\u7F6E\u6536\u4EF6\u4EBA"
+        };
+      }
+      console.log("\u{1F4EE} \u751F\u6210\u90AE\u4EF6\u5185\u5BB9...");
+      const emailContent = this.generateEmailContent(commentData, emailConfig);
+      console.log("\u{1F4EE} \u90AE\u4EF6\u4E3B\u9898:", emailContent.subject);
+      const results = [];
+      console.log("\u{1F4EE} \u5F00\u59CB\u9010\u4E2A\u53D1\u9001\u90AE\u4EF6...");
+      for (const recipient of allRecipients) {
+        try {
+          console.log(`\u{1F4EE} \u53D1\u9001\u90AE\u4EF6\u5230: ${recipient}`);
+          const result = await this.sendEmail(recipient, emailContent);
+          console.log(`\u{1F4EE} \u53D1\u9001\u7ED3\u679C [${recipient}]:`, result);
+          results.push({
+            recipient,
+            success: result.success,
+            message: result.message
+          });
+        } catch (error) {
+          console.log(`\u274C \u53D1\u9001\u5931\u8D25 [${recipient}]:`, error.message);
+          results.push({
+            recipient,
+            success: false,
+            message: error.message
+          });
+        }
+      }
+      const successCount = results.filter((r) => r.success).length;
+      const totalCount = results.length;
+      return {
+        success: successCount > 0,
+        message: `\u90AE\u4EF6\u53D1\u9001\u5B8C\u6210: ${successCount}/${totalCount} \u6210\u529F`,
+        details: results
+      };
+    } catch (error) {
+      console.error("\u90AE\u4EF6\u901A\u77E5\u53D1\u9001\u5931\u8D25:", error);
+      return {
+        success: false,
+        message: `\u90AE\u4EF6\u53D1\u9001\u5931\u8D25: ${error.message}`
+      };
+    }
+  }
+  /**
+   * 生成邮件内容
+   */
+  generateEmailContent(commentData, emailConfig) {
+    const isReply = commentData.isReply;
+    const subject = isReply ? `\u65B0\u56DE\u590D\u901A\u77E5 - ${commentData.pageTitle}` : `\u65B0\u8BC4\u8BBA\u901A\u77E5 - ${commentData.pageTitle}`;
+    const htmlContent = this.generateHTMLTemplate(commentData, emailConfig);
+    const textContent = this.generateTextTemplate(commentData, emailConfig);
+    return {
+      subject,
+      html: htmlContent,
+      text: textContent
+    };
+  }
+  /**
+   * 生成HTML邮件模板
+   */
+  generateHTMLTemplate(commentData, emailConfig) {
+    const isReply = commentData.isReply;
+    const actionText = isReply ? "\u56DE\u590D\u4E86\u8BC4\u8BBA" : "\u53D1\u8868\u4E86\u65B0\u8BC4\u8BBA";
+    const typeText = isReply ? "\u56DE\u590D" : "\u8BC4\u8BBA";
+    return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${typeText}\u901A\u77E5</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .email-container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #007cba;
+        }
+        .header h1 {
+            color: #007cba;
+            margin: 0;
+            font-size: 24px;
+        }
+        .header p {
+            margin: 5px 0 0 0;
+            color: #666;
+            font-size: 14px;
+        }
+        .notification-type {
+            background: ${isReply ? "#28a745" : "#007cba"};
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+        .page-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border-left: 4px solid #007cba;
+        }
+        .page-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .page-url {
+            color: #666;
+            font-size: 14px;
+            word-break: break-all;
+        }
+        .comment-info {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .author-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .author-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #007cba;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 12px;
+        }
+        .author-details h3 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+        .author-details p {
+            margin: 2px 0 0 0;
+            font-size: 14px;
+            color: #666;
+        }
+        .comment-content {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid ${isReply ? "#28a745" : "#007cba"};
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+        .actions {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #007cba;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 0 10px;
+        }
+        .btn:hover {
+            background: #005a87;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+        .footer p {
+            margin: 5px 0;
+        }
+        .timestamp {
+            color: #999;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>\u{1F4E7} lzreview</h1>
+            <p>\u8BC4\u8BBA\u7CFB\u7EDF\u901A\u77E5</p>
+        </div>
+
+        <div class="notification-type">
+            ${isReply ? "\u{1F4AC} \u65B0\u56DE\u590D" : "\u{1F514} \u65B0\u8BC4\u8BBA"}
+        </div>
+
+        ${emailConfig.includePageInfo !== false ? `
+        <div class="page-info">
+            <div class="page-title">\u{1F4C4} ${commentData.pageTitle}</div>
+            <div class="page-url">${commentData.pageUrl}</div>
+        </div>
+        ` : ""}
+
+        <div class="comment-info">
+            <div class="author-info">
+                <div class="author-avatar">
+                    ${commentData.authorName.charAt(0).toUpperCase()}
+                </div>
+                <div class="author-details">
+                    <h3>${commentData.authorName}</h3>
+                    <p>${actionText} \u2022 <span class="timestamp">${this.formatDate(commentData.createdAt)}</span></p>
+                </div>
+            </div>
+
+            ${emailConfig.includeCommentContent !== false ? `
+            <div class="comment-content">${commentData.content}</div>
+            ` : `
+            <p style="color: #666; font-style: italic;">\u5185\u5BB9\u5DF2\u9690\u85CF\uFF0C\u8BF7\u524D\u5F80\u9875\u9762\u67E5\u770B\u5B8C\u6574${typeText}</p>
+            `}
+        </div>
+
+        <div class="actions">
+            <a href="${commentData.pageUrl}#comment-${commentData.id}" class="btn">
+                \u67E5\u770B${typeText}
+            </a>
+            <a href="${commentData.pageUrl}" class="btn btn-secondary">
+                \u8BBF\u95EE\u9875\u9762
+            </a>
+        </div>
+
+        <div class="footer">
+            <p>\u8FD9\u662F\u6765\u81EA lzreview \u8BC4\u8BBA\u7CFB\u7EDF\u7684\u81EA\u52A8\u901A\u77E5</p>
+            <p>\u5982\u4E0D\u60F3\u63A5\u6536\u6B64\u7C7B\u90AE\u4EF6\uFF0C\u8BF7\u8054\u7CFB\u7F51\u7AD9\u7BA1\u7406\u5458</p>
+            <p style="margin-top: 15px; font-size: 11px; color: #999;">
+                \u90AE\u4EF6\u53D1\u9001\u65F6\u95F4: ${this.formatDate(/* @__PURE__ */ new Date())}
+            </p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+  /**
+   * 生成纯文本邮件模板
+   */
+  generateTextTemplate(commentData, emailConfig) {
+    const isReply = commentData.isReply;
+    const actionText = isReply ? "\u56DE\u590D\u4E86\u8BC4\u8BBA" : "\u53D1\u8868\u4E86\u65B0\u8BC4\u8BBA";
+    const typeText = isReply ? "\u56DE\u590D" : "\u8BC4\u8BBA";
+    let content = `
+lzreview \u8BC4\u8BBA\u7CFB\u7EDF\u901A\u77E5
+
+${isReply ? "\u{1F4AC} \u65B0\u56DE\u590D" : "\u{1F514} \u65B0\u8BC4\u8BBA"}
+
+`;
+    if (emailConfig.includePageInfo !== false) {
+      content += `\u9875\u9762: ${commentData.pageTitle}
+URL: ${commentData.pageUrl}
+
+`;
+    }
+    content += `${commentData.authorName} ${actionText}
+\u65F6\u95F4: ${this.formatDate(commentData.createdAt)}
+
+`;
+    if (emailConfig.includeCommentContent !== false) {
+      content += `${typeText}\u5185\u5BB9:
+${commentData.content}
+
+`;
+    } else {
+      content += `\u5185\u5BB9\u5DF2\u9690\u85CF\uFF0C\u8BF7\u524D\u5F80\u9875\u9762\u67E5\u770B\u5B8C\u6574${typeText}
+
+`;
+    }
+    content += `\u67E5\u770B${typeText}: ${commentData.pageUrl}#comment-${commentData.id}
+\u8BBF\u95EE\u9875\u9762: ${commentData.pageUrl}
+
+---
+\u8FD9\u662F\u6765\u81EA lzreview \u8BC4\u8BBA\u7CFB\u7EDF\u7684\u81EA\u52A8\u901A\u77E5
+\u5982\u4E0D\u60F3\u63A5\u6536\u6B64\u7C7B\u90AE\u4EF6\uFF0C\u8BF7\u8054\u7CFB\u7F51\u7AD9\u7BA1\u7406\u5458
+
+\u90AE\u4EF6\u53D1\u9001\u65F6\u95F4: ${this.formatDate(/* @__PURE__ */ new Date())}
+    `;
+    return content.trim();
+  }
+  /**
+   * 发送邮件 (使用 Resend API)
+   */
+  async sendEmail(recipient, content) {
+    console.log(`\u{1F4EE} sendEmail \u5F00\u59CB - \u6536\u4EF6\u4EBA: ${recipient}`);
+    try {
+      if (!this.config.apiKey) {
+        throw new Error("Resend API Key \u672A\u914D\u7F6E");
+      }
+      const emailData = {
+        from: `${this.config.fromName} <${this.config.fromEmail}>`,
+        to: [recipient],
+        subject: content.subject,
+        html: content.html,
+        text: content.text
+      };
+      console.log(`\u{1F4EE} \u51C6\u5907\u53D1\u9001\u90AE\u4EF6\u6570\u636E:`, {
+        from: emailData.from,
+        to: emailData.to,
+        subject: emailData.subject,
+        apiUrl: this.config.apiUrl
+      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.log(`\u{1F4EE} \u8BF7\u6C42\u8D85\u65F6\uFF0C\u6B63\u5728\u4E2D\u6B62\u8BF7\u6C42...`);
+        controller.abort();
+      }, 3e4);
+      console.log(`\u{1F4EE} \u5F00\u59CB\u53D1\u9001 HTTP \u8BF7\u6C42\u5230 Resend API...`);
+      const response = await fetch(this.config.apiUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.config.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(emailData),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      console.log(`\u{1F4EE} HTTP \u54CD\u5E94\u72B6\u6001: ${response.status} ${response.statusText}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.log(`\u{1F4EE} API \u9519\u8BEF\u54CD\u5E94:`, errorData);
+        throw new Error(`Resend API \u9519\u8BEF: ${response.status} - ${errorData.message || response.statusText}`);
+      }
+      console.log(`\u{1F4EE} \u5F00\u59CB\u89E3\u6790\u54CD\u5E94 JSON...`);
+      const result = await response.json();
+      console.log(`\u{1F4EE} API \u54CD\u5E94\u7ED3\u679C:`, result);
+      console.log(`\u{1F4EE} \u90AE\u4EF6\u53D1\u9001\u6210\u529F - Message ID: ${result.id}`);
+      return {
+        success: true,
+        message: "\u90AE\u4EF6\u53D1\u9001\u6210\u529F",
+        messageId: result.id
+      };
+    } catch (error) {
+      console.error("\u{1F4EE} \u90AE\u4EF6\u53D1\u9001\u5931\u8D25:", error);
+      let errorMessage = error.message;
+      if (error.name === "AbortError") {
+        errorMessage = "\u8BF7\u6C42\u8D85\u65F6 - Resend API \u54CD\u5E94\u65F6\u95F4\u8FC7\u957F";
+      } else if (error.message.includes("fetch")) {
+        errorMessage = "\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25 - \u65E0\u6CD5\u8FDE\u63A5\u5230 Resend API";
+      }
+      console.log(`\u{1F4EE} \u9519\u8BEF\u7C7B\u578B: ${error.name}, \u9519\u8BEF\u6D88\u606F: ${errorMessage}`);
+      return {
+        success: false,
+        message: errorMessage
+      };
+    }
+  }
+  /**
+   * 测试邮件发送功能
+   */
+  async test(testConfig = {}) {
+    try {
+      const testEmail = testConfig.testEmail || this.config.fromEmail;
+      const testContent = {
+        subject: "\u{1F9EA} lzreview \u90AE\u4EF6\u63A8\u9001\u6D4B\u8BD5",
+        html: this.generateTestEmailHTML(),
+        text: this.generateTestEmailText()
+      };
+      const result = await this.sendEmail(testEmail, testContent);
+      return {
+        success: result.success,
+        message: result.success ? `\u6D4B\u8BD5\u90AE\u4EF6\u5DF2\u53D1\u9001\u5230 ${testEmail}` : `\u6D4B\u8BD5\u90AE\u4EF6\u53D1\u9001\u5931\u8D25: ${result.message}`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `\u90AE\u4EF6\u63A8\u9001\u6D4B\u8BD5\u5931\u8D25: ${error.message}`
+      };
+    }
+  }
+  /**
+   * 生成测试邮件HTML内容
+   */
+  generateTestEmailHTML() {
+    return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>\u90AE\u4EF6\u63A8\u9001\u6D4B\u8BD5</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .test-header { background: #007cba; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+        .test-content { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .success-badge { background: #28a745; color: white; padding: 5px 10px; border-radius: 15px; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="test-header">
+        <h1>\u{1F9EA} lzreview \u90AE\u4EF6\u63A8\u9001\u6D4B\u8BD5</h1>
+        <p>\u5982\u679C\u60A8\u6536\u5230\u8FD9\u5C01\u90AE\u4EF6\uFF0C\u8BF4\u660E\u90AE\u4EF6\u63A8\u9001\u529F\u80FD\u6B63\u5E38\u5DE5\u4F5C</p>
+    </div>
+    
+    <div class="test-content">
+        <p><span class="success-badge">\u2705 \u6D4B\u8BD5\u6210\u529F</span></p>
+        <p><strong>\u6D4B\u8BD5\u65F6\u95F4:</strong> ${this.formatDate(/* @__PURE__ */ new Date())}</p>
+        <p><strong>\u53D1\u9001\u65B9:</strong> ${this.config.fromName} &lt;${this.config.fromEmail}&gt;</p>
+        <p><strong>\u90AE\u4EF6\u670D\u52A1:</strong> Resend API</p>
+    </div>
+    
+    <p style="color: #666; font-size: 14px; text-align: center;">
+        \u8FD9\u662F\u6765\u81EA lzreview \u8BC4\u8BBA\u7CFB\u7EDF\u7684\u6D4B\u8BD5\u90AE\u4EF6
+    </p>
+</body>
+</html>`;
+  }
+  /**
+   * 生成测试邮件文本内容
+   */
+  generateTestEmailText() {
+    return `
+lzreview \u90AE\u4EF6\u63A8\u9001\u6D4B\u8BD5
+
+\u2705 \u5982\u679C\u60A8\u6536\u5230\u8FD9\u5C01\u90AE\u4EF6\uFF0C\u8BF4\u660E\u90AE\u4EF6\u63A8\u9001\u529F\u80FD\u6B63\u5E38\u5DE5\u4F5C
+
+\u6D4B\u8BD5\u4FE1\u606F:
+- \u6D4B\u8BD5\u65F6\u95F4: ${this.formatDate(/* @__PURE__ */ new Date())}
+- \u53D1\u9001\u65B9: ${this.config.fromName} <${this.config.fromEmail}>
+- \u90AE\u4EF6\u670D\u52A1: Resend API
+
+\u8FD9\u662F\u6765\u81EA lzreview \u8BC4\u8BBA\u7CFB\u7EDF\u7684\u6D4B\u8BD5\u90AE\u4EF6
+    `;
+  }
+  /**
+   * 格式化日期
+   */
+  formatDate(date) {
+    if (!date) return "";
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    });
+  }
+};
+
+// src/notifiers/telegram.js
+var TelegramNotifier = class {
+  static {
+    __name(this, "TelegramNotifier");
+  }
+  constructor(config) {
+    console.log("\u{1F4F1} \u521D\u59CB\u5316 TelegramNotifier\uFF0C\u914D\u7F6E:", {
+      hasBotToken: !!config.botToken,
+      parseMode: "\u7EAF\u6587\u672C\u6A21\u5F0F"
+    });
+    this.config = {
+      botToken: config.botToken,
+      apiUrl: config.botToken ? `https://api.telegram.org/bot${config.botToken}` : null,
+      parseMode: config.parseMode || "Markdown"
+    };
+    if (!this.config.botToken) {
+      console.log("\u26A0\uFE0F Telegram Bot Token \u672A\u914D\u7F6E\uFF0C\u901A\u77E5\u529F\u80FD\u5C06\u4E0D\u53EF\u7528");
+    } else {
+      console.log("\u2705 Telegram Bot Token \u5DF2\u914D\u7F6E\uFF0CAPI URL:", this.config.apiUrl);
+    }
+  }
+  /**
+   * 发送新评论通知到 Telegram
+   */
+  async sendNewCommentNotification(commentData, telegramConfig) {
+    console.log("\u{1F4F1} TelegramNotifier: \u5F00\u59CB\u53D1\u9001\u65B0\u8BC4\u8BBA\u901A\u77E5");
+    console.log("\u{1F4F1} Telegram\u914D\u7F6E:", telegramConfig);
+    console.log("\u{1F4F1} Bot Token \u914D\u7F6E:", this.config.botToken ? "\u2705 \u5DF2\u914D\u7F6E" : "\u274C \u672A\u914D\u7F6E");
+    try {
+      const chatIds = telegramConfig.chatIds || [];
+      console.log("\u{1F4F1} \u63A5\u6536\u8005Chat ID\u5217\u8868:", chatIds);
+      if (chatIds.length === 0) {
+        console.log("\u274C \u6CA1\u6709\u914D\u7F6E\u63A5\u6536\u8005Chat ID");
+        return {
+          success: false,
+          message: "\u6CA1\u6709\u914D\u7F6E\u63A5\u6536\u8005Chat ID"
+        };
+      }
+      console.log("\u{1F4F1} \u751F\u6210\u6D88\u606F\u5185\u5BB9...");
+      const messageContent = this.generateMessageContent(commentData, telegramConfig);
+      console.log("\u{1F4F1} \u6D88\u606F\u5185\u5BB9\u957F\u5EA6:", messageContent.length);
+      const results = [];
+      console.log("\u{1F4F1} \u5F00\u59CB\u9010\u4E2A\u53D1\u9001\u6D88\u606F...");
+      for (const chatId of chatIds) {
+        try {
+          console.log(`\u{1F4F1} \u53D1\u9001\u6D88\u606F\u5230Chat ID: ${chatId}`);
+          const result = await this.sendMessage(chatId, messageContent);
+          console.log(`\u{1F4F1} \u53D1\u9001\u7ED3\u679C [${chatId}]:`, result);
+          results.push({
+            chatId,
+            success: result.success,
+            message: result.message
+          });
+        } catch (error) {
+          console.log(`\u274C \u53D1\u9001\u5931\u8D25 [${chatId}]:`, error.message);
+          results.push({
+            chatId,
+            success: false,
+            message: error.message
+          });
+        }
+      }
+      const successCount = results.filter((r) => r.success).length;
+      const totalCount = results.length;
+      return {
+        success: successCount > 0,
+        message: `Telegram\u6D88\u606F\u53D1\u9001\u5B8C\u6210: ${successCount}/${totalCount} \u6210\u529F`,
+        details: results
+      };
+    } catch (error) {
+      console.error("Telegram\u901A\u77E5\u53D1\u9001\u5931\u8D25:", error);
+      return {
+        success: false,
+        message: `Telegram\u53D1\u9001\u5931\u8D25: ${error.message}`
+      };
+    }
+  }
+  /**
+   * 生成Telegram消息内容
+   */
+  generateMessageContent(commentData, telegramConfig) {
+    const isReply = commentData.isReply;
+    const actionText = isReply ? "\u56DE\u590D\u4E86\u8BC4\u8BBA" : "\u53D1\u8868\u4E86\u65B0\u8BC4\u8BBA";
+    const typeText = isReply ? "\u56DE\u590D" : "\u8BC4\u8BBA";
+    const emoji = isReply ? "\u{1F4AC}" : "\u{1F514}";
+    let message = `${emoji} \u65B0${typeText}\u901A\u77E5
+
+`;
+    if (telegramConfig.includePageInfo !== false) {
+      message += `\u{1F4C4} \u9875\u9762: ${commentData.pageTitle}
+`;
+      message += `\u{1F517} \u94FE\u63A5: ${commentData.pageUrl}
+
+`;
+    }
+    message += `\u{1F464} \u4F5C\u8005: ${commentData.authorName}
+`;
+    message += `\u23F0 \u65F6\u95F4: ${this.formatDate(commentData.createdAt)}
+
+`;
+    if (telegramConfig.includeCommentContent !== false) {
+      const content = this.truncateText(commentData.content, 500);
+      message += `\u{1F4AD} ${typeText}\u5185\u5BB9:
+`;
+      message += `${content}
+
+`;
+    } else {
+      message += `\u{1F4AD} \u5185\u5BB9\u5DF2\u9690\u85CF\uFF0C\u8BF7\u524D\u5F80\u9875\u9762\u67E5\u770B\u5B8C\u6574${typeText}
+
+`;
+    }
+    message += `\u{1F517} \u67E5\u770B${typeText}: ${commentData.pageUrl}#comment-${commentData.id}
+`;
+    message += `\u{1F4D6} \u8BBF\u95EE\u9875\u9762: ${commentData.pageUrl}`;
+    return message;
+  }
+  /**
+   * 发送消息到指定的 Chat ID (带重试机制)
+   */
+  async sendMessage(chatId, message) {
+    console.log(`\u{1F4F1} sendMessage \u5F00\u59CB - Chat ID: ${chatId}`);
+    const maxRetries = 3;
+    const baseDelay = 1e3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`\u{1F4F1} \u5C1D\u8BD5\u7B2C ${attempt}/${maxRetries} \u6B21\u53D1\u9001\u6D88\u606F`);
+      try {
+        const result = await this.sendMessageAttempt(chatId, message, attempt);
+        console.log(`\u{1F4F1} \u7B2C ${attempt} \u6B21\u5C1D\u8BD5\u6210\u529F`);
+        return result;
+      } catch (error) {
+        console.log(`\u{1F4F1} \u7B2C ${attempt} \u6B21\u5C1D\u8BD5\u5931\u8D25:`, error.message);
+        if (attempt === maxRetries || this.isNonRetryableError(error)) {
+          console.log(`\u{1F4F1} \u4E0D\u518D\u91CD\u8BD5: ${attempt === maxRetries ? "\u8FBE\u5230\u6700\u5927\u91CD\u8BD5\u6B21\u6570" : "\u4E0D\u53EF\u91CD\u8BD5\u7684\u9519\u8BEF"}`);
+          throw error;
+        }
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.log(`\u{1F4F1} \u7B49\u5F85 ${delay}ms \u540E\u91CD\u8BD5...`);
+        await this.sleep(delay);
+      }
+    }
+  }
+  /**
+   * 判断是否为不可重试的错误
+   */
+  isNonRetryableError(error) {
+    const nonRetryableErrors = [
+      "Unauthorized",
+      "401",
+      "bot was blocked",
+      "chat not found",
+      "Bad Request"
+    ];
+    return nonRetryableErrors.some(
+      (errorType) => error.message.includes(errorType)
+    );
+  }
+  /**
+   * 睡眠函数
+   */
+  async sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  /**
+   * 单次发送消息尝试
+   */
+  async sendMessageAttempt(chatId, message, attempt) {
+    try {
+      if (!this.config.botToken) {
+        throw new Error("Telegram Bot Token \u672A\u914D\u7F6E");
+      }
+      if (!this.config.apiUrl) {
+        throw new Error("Telegram API URL \u672A\u914D\u7F6E");
+      }
+      if (attempt === 1) {
+        console.log(`\u{1F4F1} \u8FDB\u884C\u7F51\u7EDC\u8FDE\u901A\u6027\u68C0\u6D4B...`);
+        const connectivityResult = await this.checkNetworkConnectivity();
+        if (!connectivityResult.success) {
+          console.log(`\u{1F4F1} \u7F51\u7EDC\u8FDE\u901A\u6027\u68C0\u6D4B\u5931\u8D25: ${connectivityResult.message}`);
+        } else {
+          console.log(`\u{1F4F1} \u7F51\u7EDC\u8FDE\u901A\u6027\u68C0\u6D4B\u901A\u8FC7: ${connectivityResult.message}`);
+        }
+      }
+      const requestData = {
+        chat_id: chatId,
+        text: message,
+        disable_web_page_preview: true,
+        parse_mode: "HTML"
+      };
+      console.log(`\u{1F4F1} \u51C6\u5907\u53D1\u9001\u6D88\u606F\u6570\u636E:`, {
+        chat_id: chatId,
+        text_length: message.length,
+        disable_web_page_preview: true,
+        apiUrl: `${this.config.apiUrl}/sendMessage`,
+        attempt
+      });
+      console.log(`\u{1F4F1} \u5F00\u59CB\u53D1\u9001 HTTP \u8BF7\u6C42\u5230 Telegram API...`);
+      console.log(`\u{1F4F1} \u8BF7\u6C42 URL: ${this.config.apiUrl}/sendMessage`);
+      const fetchOptions = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "lzreview-bot/1.0",
+          "Accept": "application/json",
+          "Connection": "keep-alive"
+        },
+        body: JSON.stringify(requestData),
+        // Cloudflare Worker optimizations
+        signal: AbortSignal.timeout(3e4),
+        // 30秒超时
+        redirect: "follow",
+        referrerPolicy: "no-referrer"
+      };
+      console.log(`\u{1F4F1} \u53D1\u9001\u8BF7\u6C42\u914D\u7F6E:`, {
+        method: fetchOptions.method,
+        headers: fetchOptions.headers,
+        timeout: "30s",
+        attempt
+      });
+      const response = await fetch(`${this.config.apiUrl}/sendMessage`, fetchOptions);
+      console.log(`\u{1F4F1} HTTP \u54CD\u5E94\u72B6\u6001: ${response.status} ${response.statusText}`);
+      console.log(`\u{1F4F1} HTTP \u54CD\u5E94\u5934:`, Object.fromEntries(response.headers.entries()));
+      if (!response.ok) {
+        let errorData;
+        try {
+          const responseText = await response.text();
+          console.log(`\u{1F4F1} API \u539F\u59CB\u9519\u8BEF\u54CD\u5E94:`, responseText);
+          try {
+            errorData = JSON.parse(responseText);
+          } catch (parseError) {
+            console.log(`\u{1F4F1} JSON \u89E3\u6790\u5931\u8D25:`, parseError.message);
+            errorData = { description: responseText || response.statusText };
+          }
+        } catch (e) {
+          console.log(`\u{1F4F1} \u8BFB\u53D6\u54CD\u5E94\u5931\u8D25:`, e.message);
+          errorData = { description: response.statusText };
+        }
+        console.log(`\u{1F4F1} API \u89E3\u6790\u540E\u9519\u8BEF\u54CD\u5E94:`, errorData);
+        let errorMessage = `HTTP ${response.status}`;
+        if (errorData.description) {
+          errorMessage += ` - ${errorData.description}`;
+        }
+        if (errorData.error_code) {
+          errorMessage += ` (\u9519\u8BEF\u4EE3\u7801: ${errorData.error_code})`;
+        }
+        throw new Error(errorMessage);
+      }
+      console.log(`\u{1F4F1} \u5F00\u59CB\u89E3\u6790\u54CD\u5E94 JSON...`);
+      const result = await response.json();
+      console.log(`\u{1F4F1} API \u54CD\u5E94\u7ED3\u679C:`, result);
+      if (!result.ok) {
+        throw new Error(`Telegram API \u8FD4\u56DE\u9519\u8BEF: ${result.description}`);
+      }
+      console.log(`\u{1F4F1} \u6D88\u606F\u53D1\u9001\u6210\u529F - Message ID: ${result.result.message_id}`);
+      return {
+        success: true,
+        message: "\u6D88\u606F\u53D1\u9001\u6210\u529F",
+        messageId: result.result.message_id
+      };
+    } catch (error) {
+      console.error(`\u{1F4F1} \u7B2C ${attempt} \u6B21\u6D88\u606F\u53D1\u9001\u5931\u8D25:`, error);
+      let errorMessage = error.message;
+      let errorType = "unknown";
+      if (error.name === "AbortError" || error.message.includes("timeout")) {
+        errorMessage = "\u8BF7\u6C42\u8D85\u65F6 - Telegram API \u54CD\u5E94\u65F6\u95F4\u8FC7\u957F";
+        errorType = "timeout";
+      } else if (error.message.includes("fetch") || error.message.includes("Failed to fetch") || error.message.includes("network")) {
+        errorMessage = "\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25 - \u65E0\u6CD5\u8FDE\u63A5\u5230 Telegram API\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5";
+        errorType = "network";
+      } else if (error.message.includes("internal error")) {
+        errorMessage = "Cloudflare Worker \u5185\u90E8\u9519\u8BEF - \u53EF\u80FD\u662F\u7F51\u7EDC\u9650\u5236\u6216\u8D44\u6E90\u9650\u5236";
+        errorType = "worker_error";
+      } else if (error.message.includes("chat not found") || error.message.includes("Bad Request: chat not found")) {
+        errorMessage = "\u804A\u5929\u672A\u627E\u5230 - \u8BF7\u68C0\u67E5 Chat ID \u662F\u5426\u6B63\u786E\uFF0C\u6216\u786E\u8BA4\u673A\u5668\u4EBA\u5DF2\u52A0\u5165\u7FA4\u7EC4/\u9891\u9053";
+        errorType = "chat_not_found";
+      } else if (error.message.includes("bot was blocked") || error.message.includes("Forbidden: bot was blocked")) {
+        errorMessage = "\u673A\u5668\u4EBA\u88AB\u7528\u6237\u5C4F\u853D - \u8BF7\u8054\u7CFB\u7528\u6237\u89E3\u9664\u5C4F\u853D";
+        errorType = "bot_blocked";
+      } else if (error.message.includes("Unauthorized") || error.message.includes("401")) {
+        errorMessage = "Bot Token \u65E0\u6548 - \u8BF7\u68C0\u67E5 TELEGRAM_BOT_TOKEN \u73AF\u5883\u53D8\u91CF\u914D\u7F6E";
+        errorType = "unauthorized";
+      } else if (error.message.includes("Bad Request")) {
+        errorMessage = `\u8BF7\u6C42\u683C\u5F0F\u9519\u8BEF - ${error.message}`;
+        errorType = "bad_request";
+      } else if (error.message.includes("Too Many Requests") || error.message.includes("429")) {
+        errorMessage = "\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41 - Telegram API \u9650\u6D41\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
+        errorType = "rate_limit";
+      } else if (error.message.includes("Internal Server Error") || error.message.includes("500")) {
+        errorMessage = "Telegram \u670D\u52A1\u5668\u5185\u90E8\u9519\u8BEF - \u8BF7\u7A0D\u540E\u91CD\u8BD5";
+        errorType = "server_error";
+      }
+      console.log(`\u{1F4F1} \u9519\u8BEF\u7C7B\u578B: ${errorType} (${error.name}), \u9519\u8BEF\u6D88\u606F: ${errorMessage}`);
+      console.log(`\u{1F4F1} \u539F\u59CB\u9519\u8BEF:`, error);
+      const detailedError = new Error(errorMessage);
+      detailedError.type = errorType;
+      detailedError.attempt = attempt;
+      detailedError.originalError = error;
+      throw detailedError;
+    }
+  }
+  /**
+   * 网络连通性检测
+   */
+  async checkNetworkConnectivity() {
+    try {
+      console.log(`\u{1F4F1} \u68C0\u6D4B\u5230 api.telegram.org \u7684\u8FDE\u901A\u6027...`);
+      const response = await fetch("https://api.telegram.org/bot" + this.config.botToken + "/getMe", {
+        method: "GET",
+        headers: {
+          "User-Agent": "lzreview-bot/1.0"
+        },
+        signal: AbortSignal.timeout(1e4)
+        // 10秒超时
+      });
+      if (response.ok) {
+        const result = await response.json();
+        if (result.ok) {
+          return {
+            success: true,
+            message: `Bot @${result.result.username} \u8FDE\u63A5\u6B63\u5E38`
+          };
+        }
+      }
+      return {
+        success: false,
+        message: `HTTP ${response.status} - ${response.statusText}`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25: ${error.message}`
+      };
+    }
+  }
+  /**
+   * 测试Telegram推送功能
+   */
+  async test(testConfig = {}) {
+    try {
+      if (!this.config.botToken) {
+        return {
+          success: false,
+          message: "Bot Token \u672A\u914D\u7F6E\uFF0C\u8BF7\u68C0\u67E5\u73AF\u5883\u53D8\u91CF TELEGRAM_BOT_TOKEN"
+        };
+      }
+      if (!this.config.apiUrl) {
+        return {
+          success: false,
+          message: "API URL \u672A\u914D\u7F6E\uFF0C\u8BF7\u68C0\u67E5 Bot Token \u683C\u5F0F"
+        };
+      }
+      console.log("\u{1F4F1} \u914D\u7F6E\u68C0\u67E5\u5B8C\u6210\uFF0C\u5F00\u59CB\u9A8C\u8BC1Bot Token...");
+      const testChatId = testConfig.testChatId;
+      if (!testChatId) {
+        return {
+          success: false,
+          message: "\u8BF7\u63D0\u4F9B\u6D4B\u8BD5\u7528\u7684 Chat ID"
+        };
+      }
+      console.log("\u{1F4F1} \u53D1\u9001\u6D4B\u8BD5\u6D88\u606F...");
+      const testMessage = this.generateTestMessage();
+      const result = await this.sendMessage(testChatId, testMessage);
+      return {
+        success: result.success,
+        message: result.success ? `\u6D4B\u8BD5\u6D88\u606F\u5DF2\u53D1\u9001\u5230 Chat ID: ${testChatId}` : `\u6D4B\u8BD5\u6D88\u606F\u53D1\u9001\u5931\u8D25: ${result.message}`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Telegram\u63A8\u9001\u6D4B\u8BD5\u5931\u8D25: ${error.message}`
+      };
+    }
+  }
+  /**
+   * 生成测试消息
+   */
+  generateTestMessage() {
+    return `\u{1F9EA} lzreview Telegram\u63A8\u9001\u6D4B\u8BD5
+
+\u2705 \u5982\u679C\u60A8\u6536\u5230\u8FD9\u6761\u6D88\u606F\uFF0C\u8BF4\u660ETelegram\u63A8\u9001\u529F\u80FD\u6B63\u5E38\u5DE5\u4F5C
+
+\u{1F4CA} \u6D4B\u8BD5\u4FE1\u606F:
+\u2022 \u6D4B\u8BD5\u65F6\u95F4: ${this.formatDate(/* @__PURE__ */ new Date())}
+\u2022 \u63A8\u9001\u65B9\u5F0F: Telegram Bot API
+\u2022 \u6D88\u606F\u683C\u5F0F: \u7EAF\u6587\u672C
+
+\u8FD9\u662F\u6765\u81EA lzreview \u8BC4\u8BBA\u7CFB\u7EDF\u7684\u6D4B\u8BD5\u6D88\u606F`;
+  }
+  /**
+   * 获取Bot信息（用于验证Token）
+   */
+  async getBotInfo() {
+    try {
+      if (!this.config.botToken) {
+        throw new Error("Telegram Bot Token \u672A\u914D\u7F6E");
+      }
+      if (!this.config.apiUrl) {
+        throw new Error("Telegram API URL \u672A\u914D\u7F6E");
+      }
+      const response = await fetch(`${this.config.apiUrl}/getMe`, {
+        method: "GET"
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP\u9519\u8BEF: ${response.status}`);
+      }
+      const result = await response.json();
+      if (!result.ok) {
+        throw new Error(`API\u9519\u8BEF: ${result.description}`);
+      }
+      return {
+        success: true,
+        botInfo: result.result
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `\u83B7\u53D6Bot\u4FE1\u606F\u5931\u8D25: ${error.message}`
+      };
+    }
+  }
+  /**
+   * 转义HTML特殊字符
+   */
+  escapeHTML(text) {
+    if (!text) return "";
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  /**
+   * 截断文本
+   */
+  truncateText(text, maxLength) {
+    if (!text) return "";
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength - 3) + "...";
+  }
+  /**
+   * 格式化日期
+   */
+  formatDate(date) {
+    if (!date) return "";
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    });
+  }
+};
+
+// src/services/notification.js
+var NotificationService = class {
+  static {
+    __name(this, "NotificationService");
+  }
+  constructor(env) {
+    this.env = env;
+    this.notifiers = {};
+    this.initializeNotifiers();
+  }
+  /**
+   * 初始化通知推送器
+   */
+  initializeNotifiers() {
+    if (this.env.RESEND_API_KEY) {
+      this.notifiers.email = new EmailNotifier({
+        apiKey: this.env.RESEND_API_KEY,
+        fromName: this.env.NOTIFICATION_FROM_NAME || "lzreview\u8BC4\u8BBA\u7CFB\u7EDF",
+        fromEmail: this.env.NOTIFICATION_FROM_EMAIL || "notifications@example.com"
+      });
+    }
+    if (this.env.TELEGRAM_BOT_TOKEN) {
+      this.notifiers.telegram = new TelegramNotifier({
+        botToken: this.env.TELEGRAM_BOT_TOKEN,
+        parseMode: this.env.TELEGRAM_PARSE_MODE || "HTML"
+      });
+    }
+  }
+  /**
+   * 获取可用的推送器列表
+   */
+  getAvailableNotifiers() {
+    return Object.keys(this.notifiers);
+  }
+  /**
+   * 检查指定推送器是否可用
+   */
+  isNotifierAvailable(type) {
+    return !!this.notifiers[type];
+  }
+  /**
+   * 发送新评论通知
+   */
+  async sendNewCommentNotification(commentData, notificationConfig) {
+    console.log("\u{1F4E7} NotificationService: \u5F00\u59CB\u53D1\u9001\u65B0\u8BC4\u8BBA\u901A\u77E5");
+    console.log("\u{1F4E7} \u53EF\u7528\u63A8\u9001\u5668:", Object.keys(this.notifiers));
+    const notifications = [];
+    try {
+      if (notificationConfig.email && this.notifiers.email) {
+        console.log("\u{1F4E7} \u5F00\u59CB\u53D1\u9001\u90AE\u7BB1\u901A\u77E5...");
+        console.log("\u{1F4E7} \u90AE\u7BB1\u914D\u7F6E:", notificationConfig.email);
+        const emailResult = await this.notifiers.email.sendNewCommentNotification(
+          commentData,
+          notificationConfig.email
+        );
+        console.log("\u{1F4E7} \u90AE\u7BB1\u901A\u77E5\u7ED3\u679C:", emailResult);
+        notifications.push({
+          type: "email",
+          success: emailResult.success,
+          message: emailResult.message,
+          details: emailResult.details
+        });
+      } else {
+        console.log("\u26A0\uFE0F \u90AE\u7BB1\u901A\u77E5\u8DF3\u8FC7 - \u914D\u7F6E\u6216\u63A8\u9001\u5668\u4E0D\u53EF\u7528");
+        console.log("\u26A0\uFE0F \u90AE\u7BB1\u914D\u7F6E\u5B58\u5728:", !!notificationConfig.email);
+        console.log("\u26A0\uFE0F \u90AE\u7BB1\u63A8\u9001\u5668\u5B58\u5728:", !!this.notifiers.email);
+      }
+      if (notificationConfig.telegram && this.notifiers.telegram) {
+        console.log("\u{1F4F1} \u5F00\u59CB\u53D1\u9001Telegram\u901A\u77E5...");
+        console.log("\u{1F4F1} Telegram\u914D\u7F6E:", notificationConfig.telegram);
+        const telegramResult = await this.notifiers.telegram.sendNewCommentNotification(
+          commentData,
+          notificationConfig.telegram
+        );
+        console.log("\u{1F4F1} Telegram\u901A\u77E5\u7ED3\u679C:", telegramResult);
+        notifications.push({
+          type: "telegram",
+          success: telegramResult.success,
+          message: telegramResult.message,
+          details: telegramResult.details
+        });
+      } else {
+        console.log("\u26A0\uFE0F Telegram\u901A\u77E5\u8DF3\u8FC7 - \u914D\u7F6E\u6216\u63A8\u9001\u5668\u4E0D\u53EF\u7528");
+        console.log("\u26A0\uFE0F Telegram\u914D\u7F6E\u5B58\u5728:", !!notificationConfig.telegram);
+        console.log("\u26A0\uFE0F Telegram\u63A8\u9001\u5668\u5B58\u5728:", !!this.notifiers.telegram);
+      }
+      return {
+        success: notifications.some((n) => n.success),
+        results: notifications,
+        summary: this.generateNotificationSummary(notifications)
+      };
+    } catch (error) {
+      console.error("\u901A\u77E5\u53D1\u9001\u5931\u8D25:", error);
+      return {
+        success: false,
+        error: error.message,
+        results: notifications
+      };
+    }
+  }
+  /**
+   * 测试推送器连接
+   */
+  async testNotifier(type, config) {
+    if (!this.notifiers[type]) {
+      return {
+        success: false,
+        message: `\u63A8\u9001\u5668\u7C7B\u578B "${type}" \u4E0D\u53EF\u7528`
+      };
+    }
+    try {
+      return await this.notifiers[type].test(config);
+    } catch (error) {
+      console.error(`\u6D4B\u8BD5${type}\u63A8\u9001\u5668\u5931\u8D25:`, error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+  /**
+   * 生成通知结果摘要
+   */
+  generateNotificationSummary(notifications) {
+    const total = notifications.length;
+    const successful = notifications.filter((n) => n.success).length;
+    const failed = total - successful;
+    if (total === 0) {
+      return "\u672A\u914D\u7F6E\u4EFB\u4F55\u901A\u77E5\u65B9\u5F0F";
+    }
+    if (successful === total) {
+      return `\u6240\u6709\u901A\u77E5\u53D1\u9001\u6210\u529F (${successful}/${total})`;
+    } else if (successful === 0) {
+      return `\u6240\u6709\u901A\u77E5\u53D1\u9001\u5931\u8D25 (${failed}/${total})`;
+    } else {
+      return `\u90E8\u5206\u901A\u77E5\u53D1\u9001\u6210\u529F (${successful}/${total})\uFF0C${failed}\u4E2A\u5931\u8D25`;
+    }
+  }
+  /**
+   * 获取通知配置模板
+   */
+  getNotificationConfigTemplate() {
+    return {
+      email: {
+        enabled: false,
+        recipients: [],
+        // 管理员邮箱列表
+        subscribers: [],
+        // 订阅者邮箱列表
+        includePageInfo: true,
+        includeCommentContent: true,
+        template: "default"
+      },
+      telegram: {
+        enabled: false,
+        chatIds: [],
+        // 接收通知的Chat ID列表
+        includePageInfo: true,
+        includeCommentContent: true,
+        template: "default"
+      },
+      // 未来扩展的配置项
+      webhook: {
+        enabled: false,
+        url: "",
+        method: "POST",
+        headers: {},
+        template: "default"
+      }
+    };
+  }
+};
+var NotificationUtils = class {
+  static {
+    __name(this, "NotificationUtils");
+  }
+  /**
+   * 验证邮箱地址
+   */
+  static isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+  /**
+   * 验证Telegram Chat ID
+   */
+  static isValidChatId(chatId) {
+    if (typeof chatId === "number") {
+      return true;
+    }
+    if (typeof chatId === "string") {
+      return /^@[\w_]+$/.test(chatId) || /^-?\d+$/.test(chatId);
+    }
+    return false;
+  }
+  /**
+   * 验证通知配置
+   */
+  static validateNotificationConfig(config) {
+    const errors = [];
+    if (config.email && config.email.enabled) {
+      if (!config.email.recipients || !Array.isArray(config.email.recipients)) {
+        errors.push("\u90AE\u7BB1\u914D\u7F6E\uFF1A\u6536\u4EF6\u4EBA\u5217\u8868\u5FC5\u987B\u662F\u6570\u7EC4");
+      } else {
+        config.email.recipients.forEach((email, index) => {
+          if (!this.isValidEmail(email)) {
+            errors.push(`\u90AE\u7BB1\u914D\u7F6E\uFF1A\u7B2C${index + 1}\u4E2A\u6536\u4EF6\u4EBA\u90AE\u7BB1\u683C\u5F0F\u65E0\u6548 - ${email}`);
+          }
+        });
+      }
+      if (config.email.subscribers && Array.isArray(config.email.subscribers)) {
+        config.email.subscribers.forEach((email, index) => {
+          if (!this.isValidEmail(email)) {
+            errors.push(`\u90AE\u7BB1\u914D\u7F6E\uFF1A\u7B2C${index + 1}\u4E2A\u8BA2\u9605\u8005\u90AE\u7BB1\u683C\u5F0F\u65E0\u6548 - ${email}`);
+          }
+        });
+      }
+    }
+    if (config.telegram && config.telegram.enabled) {
+      if (!config.telegram.chatIds || !Array.isArray(config.telegram.chatIds)) {
+        errors.push("Telegram\u914D\u7F6E\uFF1AChat ID\u5217\u8868\u5FC5\u987B\u662F\u6570\u7EC4");
+      } else if (config.telegram.chatIds.length === 0) {
+        errors.push("Telegram\u914D\u7F6E\uFF1A\u81F3\u5C11\u9700\u8981\u914D\u7F6E\u4E00\u4E2AChat ID");
+      } else {
+        config.telegram.chatIds.forEach((chatId, index) => {
+          if (!this.isValidChatId(chatId)) {
+            errors.push(`Telegram\u914D\u7F6E\uFF1A\u7B2C${index + 1}\u4E2AChat ID\u683C\u5F0F\u65E0\u6548 - ${chatId}`);
+          }
+        });
+      }
+    }
+    if (config.webhook && config.webhook.enabled) {
+      if (!config.webhook.url || !config.webhook.url.startsWith("http")) {
+        errors.push("Webhook\u914D\u7F6E\uFF1AURL\u5730\u5740\u65E0\u6548");
+      }
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  /**
+   * 清理和格式化评论数据用于通知
+   */
+  static formatCommentForNotification(comment) {
+    return {
+      id: comment.id,
+      pageUrl: comment.pageUrl || comment.page_url,
+      pageTitle: comment.pageTitle || this.extractPageTitle(comment.pageUrl || comment.page_url),
+      authorName: comment.authorName || comment.author_name,
+      authorEmail: comment.authorEmail || comment.author_email,
+      content: comment.content,
+      createdAt: comment.createdAt || comment.created_at,
+      parentId: comment.parentId || comment.parent_id,
+      isReply: !!(comment.parentId || comment.parent_id)
+    };
+  }
+  /**
+   * 从URL提取页面标题（简单实现）
+   */
+  static extractPageTitle(url) {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const title = pathname.split("/").filter((segment) => segment && segment !== "index").pop() || urlObj.hostname;
+      return title.replace(/\.(html|htm|php)$/, "") || "\u672A\u77E5\u9875\u9762";
+    } catch {
+      return "\u672A\u77E5\u9875\u9762";
+    }
+  }
+  /**
+   * 生成通知摘要文本
+   */
+  static generateNotificationDigest(comments, timeFrame = "24\u5C0F\u65F6") {
+    if (!comments || comments.length === 0) {
+      return `\u8FC7\u53BB${timeFrame}\u5185\u6CA1\u6709\u65B0\u8BC4\u8BBA`;
+    }
+    const pageGroups = {};
+    comments.forEach((comment) => {
+      const pageUrl = comment.pageUrl || comment.page_url;
+      if (!pageGroups[pageUrl]) {
+        pageGroups[pageUrl] = [];
+      }
+      pageGroups[pageUrl].push(comment);
+    });
+    const summary = Object.entries(pageGroups).map(([pageUrl, pageComments]) => {
+      const pageTitle = this.extractPageTitle(pageUrl);
+      return `${pageTitle}: ${pageComments.length}\u6761\u8BC4\u8BBA`;
+    }).join("\uFF0C");
+    return `\u8FC7\u53BB${timeFrame}\u5185\u6536\u5230${comments.length}\u6761\u65B0\u8BC4\u8BBA\uFF1A${summary}`;
+  }
+};
+
+// src/handlers/notifications.js
+async function handleNotifications(request, db, env) {
+  const url = new URL(request.url);
+  const method = request.method;
+  try {
+    switch (method) {
+      case "GET":
+        if (url.pathname === "/api/notifications/config") {
+          return await getNotificationConfig(request, db);
+        }
+        if (url.pathname === "/api/notifications/notifiers") {
+          return await getAvailableNotifiers(request, env);
+        }
+        if (url.pathname === "/api/notifications/subscribers") {
+          return await getEmailSubscribers(request, db);
+        }
+        if (url.pathname === "/api/notifications/telegram-subscribers") {
+          return await getTelegramSubscribers(request, db);
+        }
+        return errorResponse("\u672A\u627E\u5230\u5BF9\u5E94\u7684API\u7AEF\u70B9", 404);
+      case "POST":
+        if (url.pathname === "/api/notifications/config") {
+          return await updateNotificationConfig(request, db);
+        }
+        if (url.pathname === "/api/notifications/test") {
+          return await testNotificationService(request, db, env);
+        }
+        if (url.pathname === "/api/notifications/subscribe") {
+          return await addEmailSubscriber(request, db);
+        }
+        if (url.pathname === "/api/notifications/telegram-subscribe") {
+          return await addTelegramSubscriber(request, db);
+        }
+        if (url.pathname === "/api/notifications/send") {
+          return await sendManualNotification(request, db, env);
+        }
+        return errorResponse("\u672A\u627E\u5230\u5BF9\u5E94\u7684API\u7AEF\u70B9", 404);
+      case "DELETE":
+        if (url.pathname.startsWith("/api/notifications/subscribe/")) {
+          return await removeEmailSubscriber(request, db);
+        }
+        if (url.pathname.startsWith("/api/notifications/telegram-subscribe/")) {
+          return await removeTelegramSubscriber(request, db);
+        }
+        return errorResponse("\u672A\u627E\u5230\u5BF9\u5E94\u7684API\u7AEF\u70B9", 404);
+      default:
+        return errorResponse("\u4E0D\u652F\u6301\u7684\u8BF7\u6C42\u65B9\u6CD5", 405);
+    }
+  } catch (error) {
+    console.error("\u901A\u77E5API\u9519\u8BEF:", error);
+    return errorResponse("\u5904\u7406\u901A\u77E5\u8BF7\u6C42\u65F6\u53D1\u751F\u9519\u8BEF", 500);
+  }
+}
+__name(handleNotifications, "handleNotifications");
+async function getNotificationConfig(request, db) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  if (!db.isValidAdmin(token)) {
+    return errorResponse("\u7BA1\u7406\u5458\u6743\u9650\u9A8C\u8BC1\u5931\u8D25", 403);
+  }
+  try {
+    const config = await db.getNotificationConfig();
+    return successResponse(config);
+  } catch (error) {
+    console.error("\u83B7\u53D6\u901A\u77E5\u914D\u7F6E\u5931\u8D25:", error);
+    const notificationService = new NotificationService();
+    return successResponse(notificationService.getNotificationConfigTemplate());
+  }
+}
+__name(getNotificationConfig, "getNotificationConfig");
+async function updateNotificationConfig(request, db) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  if (!db.isValidAdmin(token)) {
+    return errorResponse("\u7BA1\u7406\u5458\u6743\u9650\u9A8C\u8BC1\u5931\u8D25", 403);
+  }
+  try {
+    const data = await request.json();
+    const validation = NotificationUtils.validateNotificationConfig(data);
+    if (!validation.isValid) {
+      return errorResponse(`\u914D\u7F6E\u9A8C\u8BC1\u5931\u8D25: ${validation.errors.join("; ")}`);
+    }
+    await db.saveNotificationConfig(data);
+    return successResponse(null, "\u901A\u77E5\u914D\u7F6E\u66F4\u65B0\u6210\u529F");
+  } catch (error) {
+    console.error("\u66F4\u65B0\u901A\u77E5\u914D\u7F6E\u5931\u8D25:", error);
+    return errorResponse("\u66F4\u65B0\u901A\u77E5\u914D\u7F6E\u5931\u8D25");
+  }
+}
+__name(updateNotificationConfig, "updateNotificationConfig");
+async function getAvailableNotifiers(request, env) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  try {
+    const notificationService = new NotificationService(env);
+    const availableNotifiers = notificationService.getAvailableNotifiers();
+    const notifiersInfo = {
+      email: {
+        available: notificationService.isNotifierAvailable("email"),
+        name: "\u90AE\u7BB1\u63A8\u9001",
+        description: "\u901A\u8FC7 Resend API \u53D1\u9001\u90AE\u4EF6\u901A\u77E5",
+        requiredEnvVars: ["RESEND_API_KEY"],
+        configured: !!env.RESEND_API_KEY
+      },
+      telegram: {
+        available: notificationService.isNotifierAvailable("telegram"),
+        name: "Telegram\u63A8\u9001",
+        description: "\u901A\u8FC7 Telegram Bot API \u53D1\u9001\u6D88\u606F\u901A\u77E5",
+        requiredEnvVars: ["TELEGRAM_BOT_TOKEN"],
+        configured: !!env.TELEGRAM_BOT_TOKEN
+      }
+      // 未来可以添加更多推送器信息，如：
+      // webhook: { ... }
+      // wechat: { ... }
+      // dingtalk: { ... }
+    };
+    return successResponse({
+      available: availableNotifiers,
+      notifiers: notifiersInfo
+    });
+  } catch (error) {
+    console.error("\u83B7\u53D6\u63A8\u9001\u5668\u5217\u8868\u5931\u8D25:", error);
+    return errorResponse("\u83B7\u53D6\u63A8\u9001\u5668\u5217\u8868\u5931\u8D25");
+  }
+}
+__name(getAvailableNotifiers, "getAvailableNotifiers");
+async function testNotificationService(request, db, env) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  if (!db.isValidAdmin(token)) {
+    return errorResponse("\u7BA1\u7406\u5458\u6743\u9650\u9A8C\u8BC1\u5931\u8D25", 403);
+  }
+  try {
+    const data = await request.json();
+    const { type, config } = data;
+    if (!type) {
+      return errorResponse("\u8BF7\u6307\u5B9A\u8981\u6D4B\u8BD5\u7684\u63A8\u9001\u5668\u7C7B\u578B");
+    }
+    const notificationService = new NotificationService(env);
+    if (!notificationService.isNotifierAvailable(type)) {
+      return errorResponse(`\u63A8\u9001\u5668\u7C7B\u578B "${type}" \u4E0D\u53EF\u7528\uFF0C\u8BF7\u68C0\u67E5\u73AF\u5883\u53D8\u91CF\u914D\u7F6E`);
+    }
+    const testResult = await notificationService.testNotifier(type, config);
+    if (testResult.success) {
+      return successResponse(testResult, "\u63A8\u9001\u5668\u6D4B\u8BD5\u6210\u529F");
+    } else {
+      return errorResponse(`\u63A8\u9001\u5668\u6D4B\u8BD5\u5931\u8D25: ${testResult.message}`);
+    }
+  } catch (error) {
+    console.error("\u6D4B\u8BD5\u901A\u77E5\u670D\u52A1\u5931\u8D25:", error);
+    return errorResponse("\u6D4B\u8BD5\u901A\u77E5\u670D\u52A1\u5931\u8D25");
+  }
+}
+__name(testNotificationService, "testNotificationService");
+async function sendManualNotification(request, db, env) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  if (!db.isValidAdmin(token)) {
+    return errorResponse("\u7BA1\u7406\u5458\u6743\u9650\u9A8C\u8BC1\u5931\u8D25", 403);
+  }
+  try {
+    const data = await request.json();
+    const { commentId, testEmail } = data;
+    let commentData;
+    if (commentId) {
+      commentData = await db.getCommentById(commentId);
+      if (!commentData) {
+        return errorResponse("\u8BC4\u8BBA\u4E0D\u5B58\u5728");
+      }
+    } else {
+      commentData = {
+        id: "test-" + Date.now(),
+        pageUrl: "https://example.com/test-page",
+        pageTitle: "\u6D4B\u8BD5\u9875\u9762",
+        authorName: "\u6D4B\u8BD5\u7528\u6237",
+        authorEmail: "test@example.com",
+        content: "\u8FD9\u662F\u4E00\u6761\u6D4B\u8BD5\u8BC4\u8BBA\uFF0C\u7528\u4E8E\u9A8C\u8BC1\u901A\u77E5\u63A8\u9001\u529F\u80FD\u662F\u5426\u6B63\u5E38\u5DE5\u4F5C\u3002",
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        parentId: null,
+        isReply: false
+      };
+    }
+    const notificationConfig = await db.getNotificationConfig();
+    if (testEmail && NotificationUtils.isValidEmail(testEmail)) {
+      notificationConfig.email = {
+        ...notificationConfig.email,
+        enabled: true,
+        recipients: [testEmail],
+        subscribers: []
+      };
+    }
+    const notificationService = new NotificationService(env);
+    const formattedComment = NotificationUtils.formatCommentForNotification(commentData);
+    const result = await notificationService.sendNewCommentNotification(
+      formattedComment,
+      notificationConfig
+    );
+    if (result.success) {
+      return successResponse(result, "\u901A\u77E5\u53D1\u9001\u6210\u529F");
+    } else {
+      return errorResponse(`\u901A\u77E5\u53D1\u9001\u5931\u8D25: ${result.error || result.summary}`);
+    }
+  } catch (error) {
+    console.error("\u53D1\u9001\u624B\u52A8\u901A\u77E5\u5931\u8D25:", error);
+    return errorResponse("\u53D1\u9001\u624B\u52A8\u901A\u77E5\u5931\u8D25");
+  }
+}
+__name(sendManualNotification, "sendManualNotification");
+async function getEmailSubscribers(request, db) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  if (!db.isValidAdmin(token)) {
+    return errorResponse("\u7BA1\u7406\u5458\u6743\u9650\u9A8C\u8BC1\u5931\u8D25", 403);
+  }
+  try {
+    const subscribers = await db.getEmailSubscribers();
+    return successResponse({ subscribers });
+  } catch (error) {
+    console.error("\u83B7\u53D6\u90AE\u4EF6\u8BA2\u9605\u5217\u8868\u5931\u8D25:", error);
+    return successResponse({ subscribers: [] });
+  }
+}
+__name(getEmailSubscribers, "getEmailSubscribers");
+async function addEmailSubscriber(request, db) {
+  try {
+    const data = await request.json();
+    const { email, name, pageUrl } = data;
+    if (!email || !NotificationUtils.isValidEmail(email)) {
+      return errorResponse("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u90AE\u7BB1\u5730\u5740");
+    }
+    const existingSubscriber = await db.getEmailSubscriber(email);
+    if (existingSubscriber) {
+      return errorResponse("\u8BE5\u90AE\u7BB1\u5DF2\u7ECF\u8BA2\u9605\u4E86\u901A\u77E5");
+    }
+    const subscriberId = await db.addEmailSubscriber({
+      email,
+      name: name || email.split("@")[0],
+      pageUrl: pageUrl || null,
+      subscribedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      isActive: true
+    });
+    return successResponse({
+      id: subscriberId,
+      message: "\u90AE\u7BB1\u8BA2\u9605\u6210\u529F"
+    }, "\u90AE\u7BB1\u8BA2\u9605\u6210\u529F");
+  } catch (error) {
+    console.error("\u6DFB\u52A0\u90AE\u4EF6\u8BA2\u9605\u5931\u8D25:", error);
+    return errorResponse("\u6DFB\u52A0\u90AE\u4EF6\u8BA2\u9605\u5931\u8D25");
+  }
+}
+__name(addEmailSubscriber, "addEmailSubscriber");
+async function removeEmailSubscriber(request, db) {
+  try {
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split("/");
+    const emailOrId = decodeURIComponent(pathParts[pathParts.length - 1]);
+    if (!emailOrId) {
+      return errorResponse("\u8BF7\u63D0\u4F9B\u90AE\u7BB1\u5730\u5740\u6216\u8BA2\u9605ID");
+    }
+    let deleted = false;
+    if (NotificationUtils.isValidEmail(emailOrId)) {
+      deleted = await db.removeEmailSubscriberByEmail(emailOrId);
+    } else {
+      deleted = await db.removeEmailSubscriberById(emailOrId);
+    }
+    if (deleted) {
+      return successResponse(null, "\u53D6\u6D88\u8BA2\u9605\u6210\u529F");
+    } else {
+      return errorResponse("\u672A\u627E\u5230\u5BF9\u5E94\u7684\u8BA2\u9605\u8BB0\u5F55", 404);
+    }
+  } catch (error) {
+    console.error("\u5220\u9664\u90AE\u4EF6\u8BA2\u9605\u5931\u8D25:", error);
+    return errorResponse("\u5220\u9664\u90AE\u4EF6\u8BA2\u9605\u5931\u8D25");
+  }
+}
+__name(removeEmailSubscriber, "removeEmailSubscriber");
+async function triggerCommentNotification(commentData, db, env) {
+  try {
+    console.log("\u{1F514} \u5F00\u59CB\u5904\u7406\u8BC4\u8BBA\u901A\u77E5\u63A8\u9001...");
+    console.log("\u{1F4E7} \u8BC4\u8BBA\u6570\u636E:", commentData);
+    const notificationConfig = await db.getNotificationConfig();
+    console.log("\u2699\uFE0F \u901A\u77E5\u914D\u7F6E:", JSON.stringify(notificationConfig, null, 2));
+    const hasEnabledNotifications = notificationConfig.email && notificationConfig.email.enabled || notificationConfig.telegram && notificationConfig.telegram.enabled || notificationConfig.webhook && notificationConfig.webhook.enabled;
+    if (!hasEnabledNotifications) {
+      console.log("\u274C \u672A\u542F\u7528\u4EFB\u4F55\u901A\u77E5\u65B9\u5F0F\uFF0C\u8DF3\u8FC7\u901A\u77E5\u53D1\u9001");
+      console.log("\u{1F4A1} \u63D0\u793A\uFF1A\u8BF7\u5728\u7BA1\u7406\u9762\u677F\u4E2D\u542F\u7528\u90AE\u7BB1\u63A8\u9001\u5E76\u8BBE\u7F6E\u7BA1\u7406\u5458\u90AE\u7BB1");
+      return { success: true, message: "\u672A\u914D\u7F6E\u901A\u77E5" };
+    }
+    console.log("\u2705 \u68C0\u6D4B\u5230\u5DF2\u542F\u7528\u7684\u901A\u77E5\u65B9\u5F0F");
+    const notificationService = new NotificationService(env);
+    const formattedComment = NotificationUtils.formatCommentForNotification(commentData);
+    console.log("\u{1F4E4} \u5F00\u59CB\u53D1\u9001\u901A\u77E5...");
+    const result = await notificationService.sendNewCommentNotification(
+      formattedComment,
+      notificationConfig
+    );
+    console.log("\u{1F4EC} \u8BC4\u8BBA\u901A\u77E5\u53D1\u9001\u7ED3\u679C:", result);
+    if (result.success) {
+      console.log("\u2705 \u901A\u77E5\u53D1\u9001\u6210\u529F\uFF01");
+    } else {
+      console.log("\u274C \u901A\u77E5\u53D1\u9001\u5931\u8D25:", result.error || result.summary);
+    }
+    return result;
+  } catch (error) {
+    console.error("\u{1F4A5} \u89E6\u53D1\u8BC4\u8BBA\u901A\u77E5\u5931\u8D25:", error);
+    console.error("\u9519\u8BEF\u8BE6\u60C5:", error.stack);
+    return { success: false, error: error.message };
+  }
+}
+__name(triggerCommentNotification, "triggerCommentNotification");
+async function getTelegramSubscribers(request, db) {
+  const authHeader = request.headers.get("Authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return errorResponse("\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650", 401);
+  }
+  if (!db.isValidAdmin(token)) {
+    return errorResponse("\u7BA1\u7406\u5458\u6743\u9650\u9A8C\u8BC1\u5931\u8D25", 403);
+  }
+  try {
+    const subscribers = await db.getTelegramSubscribers();
+    return successResponse({ subscribers });
+  } catch (error) {
+    console.error("\u83B7\u53D6 Telegram \u8BA2\u9605\u5217\u8868\u5931\u8D25:", error);
+    return successResponse({ subscribers: [] });
+  }
+}
+__name(getTelegramSubscribers, "getTelegramSubscribers");
+async function addTelegramSubscriber(request, db) {
+  try {
+    const data = await request.json();
+    const { chatId, name, chatType, pageUrl } = data;
+    if (!chatId || !NotificationUtils.isValidChatId(chatId)) {
+      return errorResponse("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684 Chat ID");
+    }
+    const existingSubscriber = await db.getTelegramSubscriber(chatId);
+    if (existingSubscriber) {
+      return errorResponse("\u8BE5 Chat ID \u5DF2\u7ECF\u8BA2\u9605\u4E86\u901A\u77E5");
+    }
+    const subscriberId = await db.addTelegramSubscriber({
+      chatId,
+      name: name || `Chat ${chatId}`,
+      chatType: chatType || "private",
+      pageUrl: pageUrl || null,
+      subscribedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      isActive: true
+    });
+    return successResponse({
+      id: subscriberId,
+      message: "Telegram \u8BA2\u9605\u6210\u529F"
+    }, "Telegram \u8BA2\u9605\u6210\u529F");
+  } catch (error) {
+    console.error("\u6DFB\u52A0 Telegram \u8BA2\u9605\u5931\u8D25:", error);
+    return errorResponse("\u6DFB\u52A0 Telegram \u8BA2\u9605\u5931\u8D25");
+  }
+}
+__name(addTelegramSubscriber, "addTelegramSubscriber");
+async function removeTelegramSubscriber(request, db) {
+  try {
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split("/");
+    const chatIdOrId = decodeURIComponent(pathParts[pathParts.length - 1]);
+    if (!chatIdOrId) {
+      return errorResponse("\u8BF7\u63D0\u4F9B Chat ID \u6216\u8BA2\u9605ID");
+    }
+    let deleted = false;
+    if (NotificationUtils.isValidChatId(chatIdOrId)) {
+      deleted = await db.removeTelegramSubscriberByChatId(chatIdOrId);
+    } else {
+      deleted = await db.removeTelegramSubscriberById(chatIdOrId);
+    }
+    if (deleted) {
+      return successResponse(null, "\u53D6\u6D88\u8BA2\u9605\u6210\u529F");
+    } else {
+      return errorResponse("\u672A\u627E\u5230\u5BF9\u5E94\u7684\u8BA2\u9605\u8BB0\u5F55", 404);
+    }
+  } catch (error) {
+    console.error("\u5220\u9664 Telegram \u8BA2\u9605\u5931\u8D25:", error);
+    return errorResponse("\u5220\u9664 Telegram \u8BA2\u9605\u5931\u8D25");
+  }
+}
+__name(removeTelegramSubscriber, "removeTelegramSubscriber");
+
 // src/handlers/comments.js
 var cache = /* @__PURE__ */ new Map();
 var csrfTokens = /* @__PURE__ */ new Map();
@@ -1414,7 +3314,7 @@ async function handleComments(request, db, env) {
         }
         return await getComments(request, db);
       case "POST":
-        return await createComment(request, db);
+        return await createComment(request, db, env);
       case "DELETE":
         if (url.pathname === "/api/comments/batch") {
           return await batchDeleteComments(request, db);
@@ -1470,7 +3370,7 @@ async function getComments(request, db) {
   }
 }
 __name(getComments, "getComments");
-async function createComment(request, db) {
+async function createComment(request, db, env) {
   try {
     let data;
     try {
@@ -1514,6 +3414,18 @@ async function createComment(request, db) {
     };
     try {
       const commentId = await db.addComment(sanitizedData);
+      const commentDataForNotification = {
+        ...sanitizedData,
+        id: commentId,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      try {
+        console.log("\u{1F4EC} \u5F00\u59CB\u540C\u6B65\u53D1\u9001\u8BC4\u8BBA\u901A\u77E5...");
+        const notificationResult = await triggerCommentNotification(commentDataForNotification, db, env);
+        console.log("\u{1F4EC} \u8BC4\u8BBA\u901A\u77E5\u53D1\u9001\u7ED3\u679C:", notificationResult);
+      } catch (error) {
+        console.error("\u{1F4EC} \u901A\u77E5\u53D1\u9001\u5931\u8D25\uFF0C\u4F46\u4E0D\u5F71\u54CD\u8BC4\u8BBA\u53D1\u5E03:", error);
+      }
       return successResponse(
         {
           id: commentId,
@@ -1766,7 +3678,7 @@ async function removeFromWhitelist(request, db) {
 __name(removeFromWhitelist, "removeFromWhitelist");
 
 // src/index.js
-var src_default = {
+var index_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const db = new DatabaseService(env.DB);
@@ -1779,6 +3691,9 @@ var src_default = {
     }
     if (url.pathname.startsWith("/api/whitelist")) {
       return handleWhitelist(request, db, env);
+    }
+    if (url.pathname.startsWith("/api/notifications")) {
+      return handleNotifications(request, db, env);
     }
     if (url.pathname === "/admin") {
       return serveAdminPanel(env);
@@ -2032,7 +3947,7 @@ async function serveEmbedScript(request, env) {
 }
 __name(serveEmbedScript, "serveEmbedScript");
 async function serveEmbedCSS() {
-  const embedCSS = await Promise.resolve().then(() => __toESM(require_()));
+  const embedCSS = await Promise.resolve().then(() => __toESM(require_embed()));
   return new Response(embedCSS.default, {
     headers: {
       "Content-Type": "text/css",
@@ -2351,6 +4266,7 @@ async function serveAdminPanel(env) {
                 <button class="tab active" onclick="showTab('pages')">\u9875\u9762\u7BA1\u7406</button>
                 <button class="tab" onclick="showTab('comments')">\u8BC4\u8BBA\u7BA1\u7406</button>
                 <button class="tab" onclick="showTab('whitelist')">\u767D\u540D\u5355\u7BA1\u7406</button>
+                <button class="tab" onclick="showTab('notifications')">\u901A\u77E5\u63A8\u9001</button>
             </div>
 
             <div id="pages-content" class="tab-content active">
@@ -2400,6 +4316,146 @@ async function serveAdminPanel(env) {
                     </div>
                     <div id="whitelist-loading" class="loading">\u6B63\u5728\u52A0\u8F7D\u767D\u540D\u5355...</div>
                     <div id="whitelist-list"></div>
+                </div>
+            </div>
+
+            <div id="notifications-content" class="tab-content">
+                <div class="card">
+                    <h3>\u901A\u77E5\u63A8\u9001\u914D\u7F6E</h3>
+                    <div id="notification-status" class="alert" style="display: none;"></div>
+                    
+                    <!-- \u63A8\u9001\u5668\u72B6\u6001 -->
+                    <div class="card" style="margin-bottom: 20px;">
+                        <h4>\u63A8\u9001\u5668\u72B6\u6001</h4>
+                        <div id="notifiers-status">
+                            <div class="loading">\u6B63\u5728\u68C0\u67E5\u63A8\u9001\u5668\u72B6\u6001...</div>
+                        </div>
+                    </div>
+
+                    <!-- \u90AE\u7BB1\u63A8\u9001\u914D\u7F6E -->
+                    <div class="card">
+                        <h4>\u90AE\u7BB1\u63A8\u9001\u914D\u7F6E</h4>
+                        <div style="background: #e7f3ff; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #007cba;">
+                            <h5 style="margin: 0 0 10px 0; color: #007cba;">\u{1F4E7} \u90AE\u7BB1\u63A8\u9001\u529F\u80FD\u8BF4\u660E</h5>
+                            <p style="margin: 0; color: #333; line-height: 1.5;">
+                                <strong>\u7BA1\u7406\u5458\u90AE\u7BB1</strong>\uFF1A\u5F53\u7F51\u7AD9\u6709\u65B0\u8BC4\u8BBA\u65F6\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u53D1\u9001\u90AE\u4EF6\u901A\u77E5\u5230\u8FD9\u4E9B\u90AE\u7BB1\uFF0C\u8BA9\u4F60\u53CA\u65F6\u4E86\u89E3\u8BC4\u8BBA\u52A8\u6001\u3002<br>
+                                <strong>\u7528\u9014</strong>\uFF1A\u9002\u5408\u7F51\u7AD9\u7BA1\u7406\u5458\u3001\u535A\u4E3B\u7B49\u9700\u8981\u53CA\u65F6\u54CD\u5E94\u8BC4\u8BBA\u7684\u4EBA\u5458\u3002<br>
+                                <strong>\u683C\u5F0F</strong>\uFF1A\u652F\u6301\u591A\u4E2A\u90AE\u7BB1\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u5982\uFF1Aadmin@example.com, blogger@example.com
+                            </p>
+                        </div>
+                        
+                        <form id="email-notification-form">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="email-enabled"> \u542F\u7528\u90AE\u7BB1\u63A8\u9001
+                                </label>
+                                <small style="color: #666; display: block; margin-top: 5px;">
+                                    \u52FE\u9009\u540E\uFF0C\u6BCF\u5F53\u6709\u65B0\u8BC4\u8BBA\u53D1\u5E03\u65F6\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u53D1\u9001\u90AE\u4EF6\u901A\u77E5
+                                </small>
+                            </div>
+                            
+                            <div id="email-config" style="display: none;">
+                                <div class="form-group">
+                                    <label class="form-label" for="admin-emails">
+                                        \u{1F4EE} \u7BA1\u7406\u5458\u90AE\u7BB1\u5730\u5740 
+                                        <span style="color: #dc3545;">*</span>
+                                    </label>
+                                    <input type="text" id="admin-emails" class="form-input" 
+                                           placeholder="your-email@qq.com, admin@gmail.com" 
+                                           style="margin-bottom: 5px;">
+                                    <small style="color: #666; line-height: 1.4;">
+                                        \u{1F4A1} <strong>\u4F5C\u7528</strong>\uFF1A\u5F53\u6709\u65B0\u8BC4\u8BBA\u65F6\uFF0C\u8FD9\u4E9B\u90AE\u7BB1\u4F1A\u6536\u5230\u901A\u77E5\u90AE\u4EF6<br>
+                                        \u{1F4A1} <strong>\u683C\u5F0F</strong>\uFF1A\u591A\u4E2A\u90AE\u7BB1\u7528\u9017\u53F7\u5206\u9694<br>
+                                        \u{1F4A1} <strong>\u5EFA\u8BAE</strong>\uFF1A\u586B\u5199\u4F60\u7ECF\u5E38\u67E5\u770B\u7684\u90AE\u7BB1\uFF0C\u5982QQ\u90AE\u7BB1\u3001Gmail\u7B49
+                                    </small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="include-page-info" checked> \u5728\u90AE\u4EF6\u4E2D\u5305\u542B\u9875\u9762\u4FE1\u606F
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="include-comment-content" checked> \u5728\u90AE\u4EF6\u4E2D\u5305\u542B\u8BC4\u8BBA\u5185\u5BB9
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <button type="submit" class="btn">\u4FDD\u5B58\u914D\u7F6E</button>
+                                <button type="button" class="btn btn-secondary" onclick="testEmailNotification()">\u6D4B\u8BD5\u90AE\u4EF6\u53D1\u9001</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Telegram\u63A8\u9001\u914D\u7F6E -->
+                    <div class="card">
+                        <h4>Telegram\u63A8\u9001\u914D\u7F6E</h4>
+                        <div style="background: #e8f5e8; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #28a745;">
+                            <h5 style="margin: 0 0 10px 0; color: #28a745;">\u{1F4F1} Telegram\u63A8\u9001\u529F\u80FD\u8BF4\u660E</h5>
+                            <p style="margin: 0; color: #333; line-height: 1.5;">
+                                <strong>Chat ID</strong>\uFF1A\u5F53\u7F51\u7AD9\u6709\u65B0\u8BC4\u8BBA\u65F6\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u53D1\u9001\u6D88\u606F\u5230\u6307\u5B9A\u7684Telegram\u804A\u5929\uFF0C\u8BA9\u4F60\u53CA\u65F6\u4E86\u89E3\u8BC4\u8BBA\u52A8\u6001\u3002<br>
+                                <strong>\u7528\u9014</strong>\uFF1A\u9002\u5408\u5E0C\u671B\u901A\u8FC7Telegram\u5373\u65F6\u63A5\u6536\u901A\u77E5\u7684\u7528\u6237\uFF0C\u652F\u6301\u4E2A\u4EBA\u3001\u7FA4\u7EC4\u548C\u9891\u9053\u3002<br>
+                                <strong>\u914D\u7F6E</strong>\uFF1A\u9700\u8981\u5148\u521B\u5EFATelegram\u673A\u5668\u4EBA\u5E76\u83B7\u53D6Chat ID\uFF0C\u8BE6\u89C1 <a href="/TELEGRAM_SETUP.md" target="_blank">\u914D\u7F6E\u6307\u5357</a>
+                            </p>
+                        </div>
+                        
+                        <form id="telegram-notification-form">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="telegram-enabled"> \u542F\u7528Telegram\u63A8\u9001
+                                </label>
+                                <small style="color: #666; display: block; margin-top: 5px;">
+                                    \u52FE\u9009\u540E\uFF0C\u6BCF\u5F53\u6709\u65B0\u8BC4\u8BBA\u53D1\u5E03\u65F6\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u53D1\u9001Telegram\u6D88\u606F\u901A\u77E5
+                                </small>
+                            </div>
+                            
+                            <div id="telegram-config" style="display: none;">
+                                <div class="form-group">
+                                    <label class="form-label" for="telegram-chat-ids">
+                                        \u{1F4AC} \u63A5\u6536\u901A\u77E5\u7684Chat ID 
+                                        <span style="color: #dc3545;">*</span>
+                                    </label>
+                                    <input type="text" id="telegram-chat-ids" class="form-input" 
+                                           placeholder="123456789, -987654321, @your_channel" 
+                                           style="margin-bottom: 5px;">
+                                    <small style="color: #666; line-height: 1.4;">
+                                        \u{1F4A1} <strong>\u683C\u5F0F</strong>\uFF1A\u591A\u4E2AChat ID\u7528\u9017\u53F7\u5206\u9694<br>
+                                        \u{1F4A1} <strong>\u4E2A\u4EBA\u804A\u5929</strong>\uFF1A\u6B63\u6570\uFF0C\u5982 123456789<br>
+                                        \u{1F4A1} <strong>\u7FA4\u7EC4\u804A\u5929</strong>\uFF1A\u8D1F\u6570\uFF0C\u5982 -987654321<br>
+                                        \u{1F4A1} <strong>\u516C\u5F00\u9891\u9053</strong>\uFF1A@\u7528\u6237\u540D\uFF0C\u5982 @your_channel<br>
+                                        \u{1F4A1} <strong>\u83B7\u53D6\u65B9\u6CD5</strong>\uFF1A\u67E5\u770B <a href="/TELEGRAM_SETUP.md" target="_blank">\u914D\u7F6E\u6307\u5357</a>
+                                    </small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="telegram-include-page-info" checked> \u5728\u6D88\u606F\u4E2D\u5305\u542B\u9875\u9762\u4FE1\u606F
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="telegram-include-comment-content" checked> \u5728\u6D88\u606F\u4E2D\u5305\u542B\u8BC4\u8BBA\u5185\u5BB9
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <button type="submit" class="btn">\u4FDD\u5B58\u914D\u7F6E</button>
+                                <button type="button" class="btn btn-secondary" onclick="testTelegramNotification()">\u6D4B\u8BD5Telegram\u63A8\u9001</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- \u8BA2\u9605\u8005\u7BA1\u7406 -->
+                    <div class="card">
+                        <h4>\u90AE\u4EF6\u8BA2\u9605\u8005\u7BA1\u7406</h4>
+                        <div id="subscribers-loading" class="loading" style="display: none;">\u6B63\u5728\u52A0\u8F7D\u8BA2\u9605\u8005...</div>
+                        <div id="subscribers-list"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2474,6 +4530,8 @@ async function serveAdminPanel(env) {
                 loadComments();
             } else if (tabName === 'whitelist') {
                 loadWhitelist();
+            } else if (tabName === 'notifications') {
+                loadNotificationSettings();
             }
         }
 
@@ -2798,6 +4856,286 @@ async function serveAdminPanel(env) {
             const date = new Date(dateString.replace(' ', 'T'));
             return date.toLocaleString('zh-CN');
         }
+
+        // \u901A\u77E5\u8BBE\u7F6E\u76F8\u5173\u51FD\u6570
+        async function loadNotificationSettings() {
+            await loadNotifiersStatus();
+            await loadNotificationConfig();
+            await loadEmailSubscribers();
+        }
+
+        async function loadNotifiersStatus() {
+            const statusEl = document.getElementById('notifiers-status');
+            
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/notifiers\`, {
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                if (!response.ok) throw new Error('Failed to load notifiers');
+
+                const data = await response.json();
+                const notifiers = data.data.notifiers;
+                
+                statusEl.innerHTML = Object.entries(notifiers).map(([type, info]) => \`
+                    <div class="notifier-status" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; margin-bottom: 10px; background: \${info.configured ? '#d4edda' : '#f8d7da'}; border-radius: 4px;">
+                        <div>
+                            <strong>\${info.name}</strong>
+                            <br><small>\${info.description}</small>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; background: \${info.configured ? '#28a745' : '#dc3545'};">
+                                \${info.configured ? '\u2705 \u5DF2\u914D\u7F6E' : '\u274C \u672A\u914D\u7F6E'}
+                            </span>
+                            \${!info.configured ? \`<br><small style="color: #666;">\u9700\u8981: \${info.requiredEnvVars.join(', ')}</small>\` : ''}
+                        </div>
+                    </div>
+                \`).join('');
+            } catch (error) {
+                statusEl.innerHTML = '<p style="color: #dc3545;">\u52A0\u8F7D\u63A8\u9001\u5668\u72B6\u6001\u5931\u8D25</p>';
+            }
+        }
+
+        async function loadNotificationConfig() {
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/config\`, {
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                if (!response.ok) throw new Error('Failed to load config');
+
+                const data = await response.json();
+                const config = data.data || {};
+                
+                // \u586B\u5145\u90AE\u7BB1\u914D\u7F6E
+                const emailConfig = config.email || {};
+                document.getElementById('email-enabled').checked = emailConfig.enabled || false;
+                document.getElementById('admin-emails').value = (emailConfig.recipients || []).join(', ');
+                document.getElementById('include-page-info').checked = emailConfig.includePageInfo !== false;
+                document.getElementById('include-comment-content').checked = emailConfig.includeCommentContent !== false;
+                
+                toggleEmailConfig();
+
+                // \u52A0\u8F7DTelegram\u914D\u7F6E
+                const telegramConfig = config.telegram || {};
+                document.getElementById('telegram-enabled').checked = telegramConfig.enabled || false;
+                document.getElementById('telegram-chat-ids').value = (telegramConfig.chatIds || []).join(', ');
+                document.getElementById('telegram-include-page-info').checked = telegramConfig.includePageInfo !== false;
+                document.getElementById('telegram-include-comment-content').checked = telegramConfig.includeCommentContent !== false;
+                
+                toggleTelegramConfig();
+            } catch (error) {
+                console.error('\u52A0\u8F7D\u901A\u77E5\u914D\u7F6E\u5931\u8D25:', error);
+            }
+        }
+
+        function toggleEmailConfig() {
+            const enabled = document.getElementById('email-enabled').checked;
+            document.getElementById('email-config').style.display = enabled ? 'block' : 'none';
+        }
+
+        function toggleTelegramConfig() {
+            const enabled = document.getElementById('telegram-enabled').checked;
+            document.getElementById('telegram-config').style.display = enabled ? 'block' : 'none';
+        }
+
+        // \u7ED1\u5B9A\u90AE\u7BB1\u542F\u7528\u590D\u9009\u6846\u4E8B\u4EF6
+        document.getElementById('email-enabled').addEventListener('change', toggleEmailConfig);
+
+        // \u7ED1\u5B9ATelegram\u542F\u7528\u590D\u9009\u6846\u4E8B\u4EF6
+        document.getElementById('telegram-enabled').addEventListener('change', toggleTelegramConfig);
+
+        // \u7ED1\u5B9A\u90AE\u7BB1\u914D\u7F6E\u8868\u5355\u63D0\u4EA4\u4E8B\u4EF6
+        document.getElementById('email-notification-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveNotificationConfig();
+        });
+
+        // \u7ED1\u5B9ATelegram\u914D\u7F6E\u8868\u5355\u63D0\u4EA4\u4E8B\u4EF6
+        document.getElementById('telegram-notification-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveNotificationConfig();
+        });
+
+        async function saveNotificationConfig() {
+            try {
+                const emailEnabled = document.getElementById('email-enabled').checked;
+                const adminEmails = document.getElementById('admin-emails').value
+                    .split(',')
+                    .map(email => email.trim())
+                    .filter(email => email);
+
+                const telegramEnabled = document.getElementById('telegram-enabled').checked;
+                const telegramChatIds = document.getElementById('telegram-chat-ids').value
+                    .split(',')
+                    .map(chatId => chatId.trim())
+                    .filter(chatId => chatId);
+                    
+                const config = {
+                    email: {
+                        enabled: emailEnabled,
+                        recipients: adminEmails,
+                        subscribers: [], // \u4FDD\u6301\u73B0\u6709\u8BA2\u9605\u8005
+                        includePageInfo: document.getElementById('include-page-info').checked,
+                        includeCommentContent: document.getElementById('include-comment-content').checked,
+                        template: 'default'
+                    },
+                    telegram: {
+                        enabled: telegramEnabled,
+                        chatIds: telegramChatIds,
+                        includePageInfo: document.getElementById('telegram-include-page-info').checked,
+                        includeCommentContent: document.getElementById('telegram-include-comment-content').checked,
+                        template: 'default'
+                    }
+                };
+
+                const response = await fetch(\`\${apiUrl}/api/notifications/config\`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': \`Bearer \${adminToken}\`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage('\u901A\u77E5\u914D\u7F6E\u4FDD\u5B58\u6210\u529F', 'success');
+                } else {
+                    showNotificationMessage(data.message || '\u4FDD\u5B58\u5931\u8D25', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('\u4FDD\u5B58\u914D\u7F6E\u5931\u8D25', 'error');
+            }
+        }
+
+        async function testEmailNotification() {
+            const testEmail = prompt('\u8BF7\u8F93\u5165\u6D4B\u8BD5\u90AE\u7BB1\u5730\u5740:');
+            if (!testEmail) return;
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/test\`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': \`Bearer \${adminToken}\`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'email',
+                        config: { testEmail }
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage(\`\u6D4B\u8BD5\u90AE\u4EF6\u5DF2\u53D1\u9001\u5230 \${testEmail}\`, 'success');
+                } else {
+                    showNotificationMessage(data.message || '\u6D4B\u8BD5\u5931\u8D25', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('\u6D4B\u8BD5\u90AE\u4EF6\u53D1\u9001\u5931\u8D25', 'error');
+            }
+        }
+
+        async function testTelegramNotification() {
+            const testChatId = prompt('\u8BF7\u8F93\u5165\u6D4B\u8BD5Chat ID:');
+            if (!testChatId) return;
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/test\`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': \`Bearer \${adminToken}\`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'telegram',
+                        config: { testChatId }
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage(\`\u6D4B\u8BD5\u6D88\u606F\u5DF2\u53D1\u9001\u5230 Chat ID: \${testChatId}\`, 'success');
+                } else {
+                    showNotificationMessage(data.message || '\u6D4B\u8BD5\u5931\u8D25', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('\u6D4B\u8BD5Telegram\u63A8\u9001\u5931\u8D25', 'error');
+            }
+        }
+
+        async function loadEmailSubscribers() {
+            const loadingEl = document.getElementById('subscribers-loading');
+            const listEl = document.getElementById('subscribers-list');
+            
+            loadingEl.style.display = 'block';
+            listEl.innerHTML = '';
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/subscribers\`, {
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                if (!response.ok) throw new Error('Failed to load subscribers');
+
+                const data = await response.json();
+                const subscribers = data.data.subscribers || [];
+                
+                if (subscribers.length === 0) {
+                    listEl.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">\u6682\u65E0\u90AE\u4EF6\u8BA2\u9605\u8005</p>';
+                } else {
+                    listEl.innerHTML = subscribers.map(subscriber => \`
+                        <div class="whitelist-item">
+                            <div>
+                                <strong>\${subscriber.email}</strong>
+                                \${subscriber.name && subscriber.name !== subscriber.email.split('@')[0] ? \`<br><small>\${subscriber.name}</small>\` : ''}
+                                \${subscriber.page_url ? \`<br><small>\u9875\u9762: \${subscriber.page_url}</small>\` : ''}
+                                <br><small>\u8BA2\u9605\u65F6\u95F4: \${formatDate(subscriber.subscribed_at)}</small>
+                            </div>
+                            <button class="btn btn-danger" onclick="removeEmailSubscriber('\${subscriber.email}')">\u5220\u9664</button>
+                        </div>
+                    \`).join('');
+                }
+
+                loadingEl.style.display = 'none';
+            } catch (error) {
+                loadingEl.style.display = 'none';
+                listEl.innerHTML = '<p style="color: #dc3545;">\u52A0\u8F7D\u8BA2\u9605\u8005\u5931\u8D25</p>';
+            }
+        }
+
+        async function removeEmailSubscriber(email) {
+            if (!confirm(\`\u786E\u5B9A\u8981\u5220\u9664\u8BA2\u9605\u8005 \${email} \u5417\uFF1F\`)) return;
+
+            try {
+                const response = await fetch(\`\${apiUrl}/api/notifications/subscribe/\${encodeURIComponent(email)}\`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': \`Bearer \${adminToken}\` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotificationMessage('\u8BA2\u9605\u8005\u5220\u9664\u6210\u529F', 'success');
+                    await loadEmailSubscribers();
+                } else {
+                    showNotificationMessage(data.message || '\u5220\u9664\u5931\u8D25', 'error');
+                }
+            } catch (error) {
+                showNotificationMessage('\u5220\u9664\u8BA2\u9605\u8005\u5931\u8D25', 'error');
+            }
+        }
+
+        function showNotificationMessage(message, type) {
+            const messageEl = document.getElementById('notification-status');
+            messageEl.className = \`alert alert-\${type}\`;
+            messageEl.textContent = message;
+            messageEl.style.display = 'block';
+            
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 3000);
+        }
     <\/script>
 </body>
 </html>`;
@@ -2805,6 +5143,6 @@ async function serveAdminPanel(env) {
 }
 __name(serveAdminPanel, "serveAdminPanel");
 export {
-  src_default as default
+  index_default as default
 };
 //# sourceMappingURL=index.js.map
