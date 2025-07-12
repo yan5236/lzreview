@@ -1,0 +1,22 @@
+name = "lzreview"
+main = "src/index.js"
+compatibility_date = "2025-07-11"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lzreview-db"
+database_id = "your-database-id-here"
+
+[vars]
+# 基础配置
+ADMIN_TOKEN = "your-admin-token-here"
+SITE_URL = "your-site-url.com"
+
+# 邮箱推送配置 (使用 Resend)
+RESEND_API_KEY = "your-resend-api-key-here"
+NOTIFICATION_FROM_NAME = "lzreview评论系统"
+NOTIFICATION_FROM_EMAIL = "notifications@your-domain.com"
+
+# Telegram 推送配置
+TELEGRAM_BOT_TOKEN = "your-telegram-bot-token-here"
+TELEGRAM_PARSE_MODE = "HTML"
