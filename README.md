@@ -1,7 +1,7 @@
 # LzReview - 静态网站评论系统
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/yan5236/lzreview/refs/heads/main/favicon.ico">
+  <img src="https://raw.githubusercontent.com/yan5236/lzreview/refs/heads/main/logo.jpeg">
 </div>
 
 一个基于 Cloudflare Workers 和 D1 数据库的轻量级静态网站评论系统。
