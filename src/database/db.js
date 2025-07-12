@@ -272,8 +272,8 @@ export class DatabaseService {
         throw new Error('域名过长');
       }
       
-      // 域名格式验证
-      const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
+      // 域名格式验证 - 支持常见的域名格式，包括单字符域名
+      const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/;
       if (!domainRegex.test(domain)) {
         throw new Error('域名格式不正确');
       }

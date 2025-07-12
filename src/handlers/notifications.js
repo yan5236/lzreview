@@ -400,12 +400,8 @@ async function removeEmailSubscriber(request, db) {
  */
 export async function triggerCommentNotification(commentData, db, env) {
   try {
-    console.log('🔔 开始处理评论通知推送...');
-    console.log('📧 评论数据:', commentData);
-    
     // 获取通知配置
     const notificationConfig = await db.getNotificationConfig();
-    console.log('⚙️ 通知配置:', JSON.stringify(notificationConfig, null, 2));
     
     // 检查是否启用了任何通知方式
     const hasEnabledNotifications = (
@@ -415,12 +411,8 @@ export async function triggerCommentNotification(commentData, db, env) {
     );
 
     if (!hasEnabledNotifications) {
-      console.log('❌ 未启用任何通知方式，跳过通知发送');
-      console.log('💡 提示：请在管理面板中启用邮箱推送并设置管理员邮箱');
       return { success: true, message: '未配置通知' };
     }
-
-    console.log('✅ 检测到已启用的通知方式');
 
     // 创建通知服务实例
     const notificationService = new NotificationService(env);
@@ -429,24 +421,14 @@ export async function triggerCommentNotification(commentData, db, env) {
     const formattedComment = NotificationUtils.formatCommentForNotification(commentData);
     
     // 发送通知
-    console.log('📤 开始发送通知...');
     const result = await notificationService.sendNewCommentNotification(
       formattedComment, 
       notificationConfig
     );
-
-    console.log('📬 评论通知发送结果:', result);
-    
-    if (result.success) {
-      console.log('✅ 通知发送成功！');
-    } else {
-      console.log('❌ 通知发送失败:', result.error || result.summary);
-    }
     
     return result;
   } catch (error) {
-    console.error('💥 触发评论通知失败:', error);
-    console.error('错误详情:', error.stack);
+    console.error('通知推送失败:', error.message);
     return { success: false, error: error.message };
   }
 }

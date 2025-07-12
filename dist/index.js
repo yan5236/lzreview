@@ -1019,7 +1019,7 @@ var DatabaseService = class {
       if (domain.length > 253) {
         throw new Error("\u57DF\u540D\u8FC7\u957F");
       }
-      const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
+      const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/;
       if (!domainRegex.test(domain)) {
         throw new Error("\u57DF\u540D\u683C\u5F0F\u4E0D\u6B63\u786E");
       }
@@ -2628,47 +2628,31 @@ var NotificationService = class {
    * 发送新评论通知
    */
   async sendNewCommentNotification(commentData, notificationConfig) {
-    console.log("\u{1F4E7} NotificationService: \u5F00\u59CB\u53D1\u9001\u65B0\u8BC4\u8BBA\u901A\u77E5");
-    console.log("\u{1F4E7} \u53EF\u7528\u63A8\u9001\u5668:", Object.keys(this.notifiers));
     const notifications = [];
     try {
       if (notificationConfig.email && this.notifiers.email) {
-        console.log("\u{1F4E7} \u5F00\u59CB\u53D1\u9001\u90AE\u7BB1\u901A\u77E5...");
-        console.log("\u{1F4E7} \u90AE\u7BB1\u914D\u7F6E:", notificationConfig.email);
         const emailResult = await this.notifiers.email.sendNewCommentNotification(
           commentData,
           notificationConfig.email
         );
-        console.log("\u{1F4E7} \u90AE\u7BB1\u901A\u77E5\u7ED3\u679C:", emailResult);
         notifications.push({
           type: "email",
           success: emailResult.success,
           message: emailResult.message,
           details: emailResult.details
         });
-      } else {
-        console.log("\u26A0\uFE0F \u90AE\u7BB1\u901A\u77E5\u8DF3\u8FC7 - \u914D\u7F6E\u6216\u63A8\u9001\u5668\u4E0D\u53EF\u7528");
-        console.log("\u26A0\uFE0F \u90AE\u7BB1\u914D\u7F6E\u5B58\u5728:", !!notificationConfig.email);
-        console.log("\u26A0\uFE0F \u90AE\u7BB1\u63A8\u9001\u5668\u5B58\u5728:", !!this.notifiers.email);
       }
       if (notificationConfig.telegram && this.notifiers.telegram) {
-        console.log("\u{1F4F1} \u5F00\u59CB\u53D1\u9001Telegram\u901A\u77E5...");
-        console.log("\u{1F4F1} Telegram\u914D\u7F6E:", notificationConfig.telegram);
         const telegramResult = await this.notifiers.telegram.sendNewCommentNotification(
           commentData,
           notificationConfig.telegram
         );
-        console.log("\u{1F4F1} Telegram\u901A\u77E5\u7ED3\u679C:", telegramResult);
         notifications.push({
           type: "telegram",
           success: telegramResult.success,
           message: telegramResult.message,
           details: telegramResult.details
         });
-      } else {
-        console.log("\u26A0\uFE0F Telegram\u901A\u77E5\u8DF3\u8FC7 - \u914D\u7F6E\u6216\u63A8\u9001\u5668\u4E0D\u53EF\u7528");
-        console.log("\u26A0\uFE0F Telegram\u914D\u7F6E\u5B58\u5728:", !!notificationConfig.telegram);
-        console.log("\u26A0\uFE0F Telegram\u63A8\u9001\u5668\u5B58\u5728:", !!this.notifiers.telegram);
       }
       return {
         success: notifications.some((n) => n.success),
@@ -3173,34 +3157,20 @@ async function removeEmailSubscriber(request, db) {
 __name(removeEmailSubscriber, "removeEmailSubscriber");
 async function triggerCommentNotification(commentData, db, env) {
   try {
-    console.log("\u{1F514} \u5F00\u59CB\u5904\u7406\u8BC4\u8BBA\u901A\u77E5\u63A8\u9001...");
-    console.log("\u{1F4E7} \u8BC4\u8BBA\u6570\u636E:", commentData);
     const notificationConfig = await db.getNotificationConfig();
-    console.log("\u2699\uFE0F \u901A\u77E5\u914D\u7F6E:", JSON.stringify(notificationConfig, null, 2));
     const hasEnabledNotifications = notificationConfig.email && notificationConfig.email.enabled || notificationConfig.telegram && notificationConfig.telegram.enabled || notificationConfig.webhook && notificationConfig.webhook.enabled;
     if (!hasEnabledNotifications) {
-      console.log("\u274C \u672A\u542F\u7528\u4EFB\u4F55\u901A\u77E5\u65B9\u5F0F\uFF0C\u8DF3\u8FC7\u901A\u77E5\u53D1\u9001");
-      console.log("\u{1F4A1} \u63D0\u793A\uFF1A\u8BF7\u5728\u7BA1\u7406\u9762\u677F\u4E2D\u542F\u7528\u90AE\u7BB1\u63A8\u9001\u5E76\u8BBE\u7F6E\u7BA1\u7406\u5458\u90AE\u7BB1");
       return { success: true, message: "\u672A\u914D\u7F6E\u901A\u77E5" };
     }
-    console.log("\u2705 \u68C0\u6D4B\u5230\u5DF2\u542F\u7528\u7684\u901A\u77E5\u65B9\u5F0F");
     const notificationService = new NotificationService(env);
     const formattedComment = NotificationUtils.formatCommentForNotification(commentData);
-    console.log("\u{1F4E4} \u5F00\u59CB\u53D1\u9001\u901A\u77E5...");
     const result = await notificationService.sendNewCommentNotification(
       formattedComment,
       notificationConfig
     );
-    console.log("\u{1F4EC} \u8BC4\u8BBA\u901A\u77E5\u53D1\u9001\u7ED3\u679C:", result);
-    if (result.success) {
-      console.log("\u2705 \u901A\u77E5\u53D1\u9001\u6210\u529F\uFF01");
-    } else {
-      console.log("\u274C \u901A\u77E5\u53D1\u9001\u5931\u8D25:", result.error || result.summary);
-    }
     return result;
   } catch (error) {
-    console.error("\u{1F4A5} \u89E6\u53D1\u8BC4\u8BBA\u901A\u77E5\u5931\u8D25:", error);
-    console.error("\u9519\u8BEF\u8BE6\u60C5:", error.stack);
+    console.error("\u901A\u77E5\u63A8\u9001\u5931\u8D25:", error.message);
     return { success: false, error: error.message };
   }
 }
@@ -3281,7 +3251,7 @@ __name(removeTelegramSubscriber, "removeTelegramSubscriber");
 // src/handlers/comments.js
 var cache = /* @__PURE__ */ new Map();
 var csrfTokens = /* @__PURE__ */ new Map();
-async function handleComments(request, db, env) {
+async function handleComments(request, db, env, ctx) {
   const url = new URL(request.url);
   const method = request.method;
   const ip = getClientIP(request);
@@ -3314,7 +3284,7 @@ async function handleComments(request, db, env) {
         }
         return await getComments(request, db);
       case "POST":
-        return await createComment(request, db, env);
+        return await createComment(request, db, env, ctx);
       case "DELETE":
         if (url.pathname === "/api/comments/batch") {
           return await batchDeleteComments(request, db);
@@ -3370,7 +3340,7 @@ async function getComments(request, db) {
   }
 }
 __name(getComments, "getComments");
-async function createComment(request, db, env) {
+async function createComment(request, db, env, ctx) {
   try {
     let data;
     try {
@@ -3419,13 +3389,17 @@ async function createComment(request, db, env) {
         id: commentId,
         createdAt: (/* @__PURE__ */ new Date()).toISOString()
       };
-      try {
-        console.log("\u{1F4EC} \u5F00\u59CB\u540C\u6B65\u53D1\u9001\u8BC4\u8BBA\u901A\u77E5...");
-        const notificationResult = await triggerCommentNotification(commentDataForNotification, db, env);
-        console.log("\u{1F4EC} \u8BC4\u8BBA\u901A\u77E5\u53D1\u9001\u7ED3\u679C:", notificationResult);
-      } catch (error) {
-        console.error("\u{1F4EC} \u901A\u77E5\u53D1\u9001\u5931\u8D25\uFF0C\u4F46\u4E0D\u5F71\u54CD\u8BC4\u8BBA\u53D1\u5E03:", error);
-      }
+      ctx.waitUntil(
+        triggerCommentNotification(commentDataForNotification, db, env).then((result) => {
+          if (result.success) {
+            console.log("\u{1F4EC} \u8BC4\u8BBA\u901A\u77E5\u53D1\u9001\u6210\u529F");
+          } else {
+            console.error("\u{1F4EC} \u901A\u77E5\u53D1\u9001\u5931\u8D25:", result.error || result.summary);
+          }
+        }).catch((error) => {
+          console.error("\u{1F4EC} \u901A\u77E5\u53D1\u9001\u5F02\u5E38:", error.message);
+        })
+      );
       return successResponse(
         {
           id: commentId,
@@ -3687,7 +3661,7 @@ var index_default = {
       return corsResponse();
     }
     if (url.pathname.startsWith("/api/comments")) {
-      return handleComments(request, db, env);
+      return handleComments(request, db, env, ctx);
     }
     if (url.pathname.startsWith("/api/whitelist")) {
       return handleWhitelist(request, db, env);

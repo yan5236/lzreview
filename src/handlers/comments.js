@@ -6,7 +6,7 @@ import { triggerCommentNotification } from './notifications.js';
 const cache = new Map();
 const csrfTokens = new Map(); // 存储CSRF令牌
 
-export async function handleComments(request, db, env) {
+export async function handleComments(request, db, env, ctx) {
   const url = new URL(request.url);
   const method = request.method;
   const ip = getClientIP(request);
@@ -45,7 +45,7 @@ export async function handleComments(request, db, env) {
         }
         return await getComments(request, db);
       case 'POST':
-        return await createComment(request, db, env);
+        return await createComment(request, db, env, ctx);
       case 'DELETE':
         if (url.pathname === '/api/comments/batch') {
           return await batchDeleteComments(request, db);
@@ -113,7 +113,7 @@ async function getComments(request, db) {
   }
 }
 
-async function createComment(request, db, env) {
+async function createComment(request, db, env, ctx) {
   try {
     let data;
     try {
@@ -176,21 +176,27 @@ async function createComment(request, db, env) {
     try {
       const commentId = await db.addComment(sanitizedData);
       
-      // 同步触发通知推送（确保执行上下文完整）
+      // 使用 ctx.waitUntil 异步触发通知推送（不阻塞响应，但确保任务完成）
       const commentDataForNotification = {
         ...sanitizedData,
         id: commentId,
         createdAt: new Date().toISOString()
       };
       
-      // 等待通知发送完成，确保在主请求上下文中执行
-      try {
-        console.log('📬 开始同步发送评论通知...');
-        const notificationResult = await triggerCommentNotification(commentDataForNotification, db, env);
-        console.log('📬 评论通知发送结果:', notificationResult);
-      } catch (error) {
-        console.error('📬 通知发送失败，但不影响评论发布:', error);
-      }
+      // 使用 waitUntil 确保异步通知任务能够完成
+      ctx.waitUntil(
+        triggerCommentNotification(commentDataForNotification, db, env)
+          .then(result => {
+            if (result.success) {
+              console.log('📬 评论通知发送成功');
+            } else {
+              console.error('📬 通知发送失败:', result.error || result.summary);
+            }
+          })
+          .catch(error => {
+            console.error('📬 通知发送异常:', error.message);
+          })
+      );
       
       return successResponse(
         { 

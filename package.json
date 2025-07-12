@@ -4,7 +4,7 @@
   "description": "一个基于Cloudflare Workers和D1数据库的静态网站评论系统",
   "main": "src/index.js",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "set port=8787 && wrangler dev",
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 execute lzreview-db --file=src/database/schema.sql"
   },

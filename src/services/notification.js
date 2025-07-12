@@ -60,23 +60,15 @@ export class NotificationService {
    * 发送新评论通知
    */
   async sendNewCommentNotification(commentData, notificationConfig) {
-    console.log('📧 NotificationService: 开始发送新评论通知');
-    console.log('📧 可用推送器:', Object.keys(this.notifiers));
-    
     const notifications = [];
     
     try {
       // 邮箱通知
       if (notificationConfig.email && this.notifiers.email) {
-        console.log('📧 开始发送邮箱通知...');
-        console.log('📧 邮箱配置:', notificationConfig.email);
-        
         const emailResult = await this.notifiers.email.sendNewCommentNotification(
           commentData, 
           notificationConfig.email
         );
-        
-        console.log('📧 邮箱通知结果:', emailResult);
         
         notifications.push({
           type: 'email',
@@ -84,23 +76,14 @@ export class NotificationService {
           message: emailResult.message,
           details: emailResult.details
         });
-      } else {
-        console.log('⚠️ 邮箱通知跳过 - 配置或推送器不可用');
-        console.log('⚠️ 邮箱配置存在:', !!notificationConfig.email);
-        console.log('⚠️ 邮箱推送器存在:', !!this.notifiers.email);
       }
 
       // Telegram通知
       if (notificationConfig.telegram && this.notifiers.telegram) {
-        console.log('📱 开始发送Telegram通知...');
-        console.log('📱 Telegram配置:', notificationConfig.telegram);
-        
         const telegramResult = await this.notifiers.telegram.sendNewCommentNotification(
           commentData, 
           notificationConfig.telegram
         );
-        
-        console.log('📱 Telegram通知结果:', telegramResult);
         
         notifications.push({
           type: 'telegram',
@@ -108,10 +91,6 @@ export class NotificationService {
           message: telegramResult.message,
           details: telegramResult.details
         });
-      } else {
-        console.log('⚠️ Telegram通知跳过 - 配置或推送器不可用');
-        console.log('⚠️ Telegram配置存在:', !!notificationConfig.telegram);
-        console.log('⚠️ Telegram推送器存在:', !!this.notifiers.telegram);
       }
 
       // 未来可以添加其他类型的通知

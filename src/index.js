@@ -17,7 +17,7 @@ export default {
 
     // 路由处理
     if (url.pathname.startsWith('/api/comments')) {
-      return handleComments(request, db, env);
+      return handleComments(request, db, env, ctx);
     }
 
     // 白名单管理
